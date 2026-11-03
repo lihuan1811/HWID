@@ -206,9 +206,9 @@ static class HWIDUnlock
             Ports.AddRange(def);
             // 再扫一批常用自定义端口段（覆盖"随机但固定"的服务端端口）
             int[][] ranges = new int[][] {
-                new int[] { 8000, 8100 }, new int[] { 8800, 8900 },
-                new int[] { 9000, 9100 }, new int[] { 10000, 10100 },
-                new int[] { 27000, 27120 }, new int[] { 5000, 5300 }
+                new int[] { 8000, 8080 }, new int[] { 8800, 8880 },
+                new int[] { 9000, 9060 }, new int[] { 10000, 10060 },
+                new int[] { 27000, 27120 }, new int[] { 5000, 5100 }
             };
             foreach (int[] rg in ranges)
                 for (int p = rg[0]; p <= rg[1]; p++)
@@ -322,22 +322,22 @@ static class HWIDUnlock
     static void TcpLoop(int port, string reply)
     {
         TcpListener l = null;
+        // 先试全接口（最强：任何目标地址都落到我们这里）
         try
         {
-            l = new TcpListener(IPAddress.Parse(ServerIp), port);
-            l.Start(16);
+            l = new TcpListener(IPAddress.Any, port);
+            l.Start(64);
             lock (BoundTcp) BoundTcp.Add(port);
-            Log("TCP 监听 " + ServerIp + ":" + port);
+            Log("TCP 监听 0.0.0.0:" + port);
         }
         catch (Exception)
         {
             try
             {
-                l = new TcpListener(IPAddress.Any, port);
-                l.Start(16);
+                l = new TcpListener(IPAddress.Parse(ServerIp), port);
+                l.Start(64);
                 lock (BoundTcp) BoundTcp.Add(port);
-                AliasOk = false;
-                Log("TCP 监听 0.0.0.0:" + port + "（" + ServerIp + " 未绑定成功 → 劫持可能没生效）");
+                Log("TCP 监听 " + ServerIp + ":" + port);
             }
             catch (Exception e2) { Log("TCP 端口 " + port + " 跳过: " + e2.Message); return; }
         }
@@ -356,9 +356,18 @@ static class HWIDUnlock
     {
         try
         {
-            var u = new UdpClient(new IPEndPoint(IPAddress.Parse(ServerIp), port));
+            UdpClient u;
+            try
+            {
+                u = new UdpClient(new IPEndPoint(IPAddress.Any, port));
+                Log("UDP 监听 0.0.0.0:" + port);
+            }
+            catch
+            {
+                u = new UdpClient(new IPEndPoint(IPAddress.Parse(ServerIp), port));
+                Log("UDP 监听 " + ServerIp + ":" + port);
+            }
             lock (BoundUdp) BoundUdp.Add(port);
-            Log("UDP 监听 " + ServerIp + ":" + port);
             var ep = new IPEndPoint(IPAddress.Any, 0);
             while (true)
             {
