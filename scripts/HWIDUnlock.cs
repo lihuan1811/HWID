@@ -13,6 +13,43 @@ using System.Threading;
 
 static class HWIDUnlock
 {
+    // ---- 枚举系统 TCP 连接（用来动态发现"它连的哪个端口"）
+    [System.Runtime.InteropServices.DllImport("iphlpapi.dll", SetLastError = true)]
+    static extern uint GetExtendedTcpTable(IntPtr pTcpTable, ref int pdwSize, bool bOrder,
+        int ulAf, int tableClass, uint reserved);
+
+    const int AF_INET = 2;
+    const int TCP_TABLE_OWNER_PID_ALL = 5;
+
+    // 返回 List<int> 目标端口（所有连向 ServerIp 的连接，含 SYN_SENT）
+    static List<int> SniffTargetPorts()
+    {
+        var res = new List<int>();
+        int size = 0;
+        GetExtendedTcpTable(IntPtr.Zero, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+        if (size <= 0) return res;
+        IntPtr buf = System.Runtime.InteropServices.Marshal.AllocHGlobal(size);
+        try
+        {
+            if (GetExtendedTcpTable(buf, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) != 0)
+                return res;
+            int rows = System.Runtime.InteropServices.Marshal.ReadInt32(buf);
+            int rowSize = 24;
+            long target = IPAddress.Parse(ServerIp).Address;
+            for (int i = 0; i < rows; i++)
+            {
+                IntPtr p = new IntPtr(buf.ToInt64() + 4 + i * rowSize);
+                uint remote = (uint)System.Runtime.InteropServices.Marshal.ReadInt32(p, 12);
+                int remotePort = (int)(((uint)System.Runtime.InteropServices.Marshal.ReadInt32(p, 16) & 0xFFFF));
+                remotePort = ((remotePort & 0xFF) << 8) | ((remotePort >> 8) & 0xFF);   // 网络序
+                if (remote == (uint)target) res.Add(remotePort);
+            }
+        }
+        catch { }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(buf); }
+        return res;
+    }
+
     const string DEFAULT_SERVER_IP = "111.229.48.214";
     static readonly Encoding GBK = Encoding.GetEncoding(936);
     static string LogPath;
@@ -22,6 +59,11 @@ static class HWIDUnlock
     static readonly List<int> Ports = new List<int>();
     static bool Launch = true;
     static bool KeepAlias = false;
+    static readonly HashSet<int> BoundTcp = new HashSet<int>();
+    static readonly HashSet<int> BoundUdp = new HashSet<int>();
+    static readonly HashSet<int> SeenPorts = new HashSet<int>();
+    static string Reply = "";
+    static volatile bool AliasOk = false;
     static int ExitAfter = 0;
 
     static void Log(string s)
@@ -206,6 +248,7 @@ static class HWIDUnlock
         {
             l = new TcpListener(IPAddress.Parse(ServerIp), port);
             l.Start(16);
+            lock (BoundTcp) BoundTcp.Add(port);
             Log("TCP 监听 " + ServerIp + ":" + port);
         }
         catch (Exception)
@@ -214,7 +257,9 @@ static class HWIDUnlock
             {
                 l = new TcpListener(IPAddress.Any, port);
                 l.Start(16);
-                Log("TCP 监听 0.0.0.0:" + port + "（" + ServerIp + " 未绑定成功，可能是劫持没做）");
+                lock (BoundTcp) BoundTcp.Add(port);
+                AliasOk = false;
+                Log("TCP 监听 0.0.0.0:" + port + "（" + ServerIp + " 未绑定成功 → 劫持可能没生效）");
             }
             catch (Exception e2) { Log("TCP 端口 " + port + " 跳过: " + e2.Message); return; }
         }
@@ -234,6 +279,7 @@ static class HWIDUnlock
         try
         {
             var u = new UdpClient(new IPEndPoint(IPAddress.Parse(ServerIp), port));
+            lock (BoundUdp) BoundUdp.Add(port);
             Log("UDP 监听 " + ServerIp + ":" + port);
             var ep = new IPEndPoint(IPAddress.Any, 0);
             while (true)
@@ -287,7 +333,20 @@ static class HWIDUnlock
         string ifName = FindLoopback();
         Log("回环网卡: " + ifName);
         RunNetsh(string.Format("interface ipv4 add address name=\"{0}\" address={1} mask=255.255.255.255", ifName, ServerIp));
-        Log("已尝试把 " + ServerIp + " 绑到本机（若已存在会报重复，忽略）");
+        // 验证是否真的绑上了：尝试绑定该 IP 的临时端口
+        try
+        {
+            var probe = new TcpListener(IPAddress.Parse(ServerIp), 0);
+            probe.Start(); probe.Stop();
+            AliasOk = true;
+            Log("劫持状态: 成功（" + ServerIp + " 已在本机）");
+        }
+        catch
+        {
+            AliasOk = false;
+            Log("[!] 劫持状态: 失败 —— 程序会连到真服务器，登录会卡住/失败");
+            Log("    请确认是以管理员身份运行；或手动执行 1_redirect_ip.ps1");
+        }
     }
 
     static void DelAlias()
@@ -296,6 +355,47 @@ static class HWIDUnlock
         string ifName = FindLoopback();
         RunNetsh(string.Format("interface ipv4 delete address name=\"{0}\" address={1}", ifName, ServerIp));
         Log("已还原 IP 劫持");
+    }
+
+    static void PortSniffer()
+    {
+        int tick = 0;
+        while (true)
+        {
+            try
+            {
+                List<int> ports = SniffTargetPorts();
+                foreach (int p in ports)
+                {
+                    bool isNew = false;
+                    lock (SeenPorts) { if (!SeenPorts.Contains(p)) { SeenPorts.Add(p); isNew = true; } }
+                    if (isNew)
+                        Log("*** 检测到程序连接 " + ServerIp + ":" + p + "  ← 目标端口就是这个！");
+                    bool needTcp, needUdp;
+                    lock (BoundTcp) needTcp = !BoundTcp.Contains(p);
+                    lock (BoundUdp) needUdp = !BoundUdp.Contains(p);
+                    if (needTcp)
+                    {
+                        int cp = p;
+                        Log(">>> 立刻在端口 " + p + " 上补开 TCP 监听");
+                        var t = new Thread(delegate () { TcpLoop(cp, Reply); });
+                        t.IsBackground = true; t.Start();
+                    }
+                    if (needUdp)
+                    {
+                        int cp = p;
+                        var u = new Thread(delegate () { UdpLoop(cp, Reply); });
+                        u.IsBackground = true; u.Start();
+                    }
+                }
+                if (tick % 75 == 0 && !AliasOk)
+                    Log("[i] 仍在等待；当前未检测到任何到 " + ServerIp + " 的连接"
+                        + "（如果程序已经" + "点了登录" + "，说明它连的是别处或本地就拦住了）");
+            }
+            catch { }
+            tick++;
+            Thread.Sleep(200);
+        }
     }
 
     static void Main(string[] argv)
@@ -323,6 +423,7 @@ static class HWIDUnlock
         AddAlias();
 
         string reply = ReplyFor(Mode);
+        Reply = reply;
         if (reply.Length > 0) Log("回包内容: " + reply);
         else Log("log 模式：只抓包不回包");
 
@@ -337,6 +438,11 @@ static class HWIDUnlock
                 u.IsBackground = true; u.Start();
             }
         }
+
+        var sniffer = new Thread(delegate () { PortSniffer(); });
+        sniffer.IsBackground = true;
+        sniffer.Start();
+        Log("端口哨兵已启动：它连任何端口，我会立刻在那个端口补开监听");
 
         Thread.Sleep(600);
 
