@@ -251,6 +251,7 @@ def main():
     ap.add_argument('--json')
     a = ap.parse_args()
 
+    print(f'[dbg] 参数: exe={a.exe} bp={a.bp} maxhits={a.maxhits} timeout={a.timeout} patch={a.patch}')
     si = STARTUPINFOW()
     si.cb = ctypes.sizeof(si)
     pi = PROCESS_INFORMATION()
@@ -302,14 +303,10 @@ def main():
             continue
         code = ev.dwDebugEventCode
         cont = DBG_CONTINUE
+        print(f'    [ev] code={code} tid={ev.dwThreadId}')
 
         if code == CREATE_PROCESS_DEBUG_EVENT:
-            # CREATE_PROCESS_DEBUG_INFO.lpBaseOfImage 在偏移 16（64 位视图）
-            raw = bytes(ev.u.raw)
-            lp_base = struct.unpack_from('<Q', raw, 16)[0]
-            base = lp_base
-            size, is64t = read_pe_info(hp, base)
-            print(f'[+] 主模块 base={base:#x} SizeOfImage={size:#x} ({64 if is64t else 32}位)')
+            pass   # 等首个断点（进程已初始化）再用 EnumProcessModules 取基址，最稳
 
         elif code == LOAD_DLL_DEBUG_EVENT:
             lp = ev.u.LoadDll.lpBaseOfDll
@@ -336,7 +333,25 @@ def main():
             ecode = er.ExceptionCode
             eaddr = er.ExceptionAddress or 0
             if ecode == EXCEPTION_BREAKPOINT and (eaddr - 1) not in armed:
-                # 系统/loader 断点：每次都尝试 arm（DLL 陆续加载中）
+                # 系统/loader 断点：每次尝试 ①补模块信息 ②arm 断点
+                if base == 0:
+                    try:
+                        class MODULEINFO(ctypes.Structure):
+                            _fields_ = [('lpBaseOfDll', ctypes.c_void_p), ('SizeOfImage', wt.DWORD),
+                                        ('EntryPoint', ctypes.c_void_p)]
+                        mod = MODULEINFO()
+                        mods = (wt.HMODULE * 1024)()
+                        cb = wt.DWORD(0)
+                        if k32.K32EnumProcessModules(P(hp), ctypes.byref(mods), ctypes.sizeof(mods),
+                                                     ctypes.byref(cb)) and cb.value:
+                            k32.K32GetModuleInformation(P(hp), ctypes.cast(mods[0], P),
+                                                        ctypes.byref(mod), ctypes.sizeof(mod))
+                            base = mod.lpBaseOfDll or 0
+                            size = mod.SizeOfImage
+                            print(f'[+] 主模块 base={base:#x} SizeOfImage={size:#x} '
+                                  f'EP RVA={(mod.EntryPoint or 0) - base:#x}')
+                    except Exception as ex:
+                        print(f'[!] 取模块信息失败: {ex}')
                 try_arm()
             elif ecode == EXCEPTION_BREAKPOINT and eaddr - 1 in armed:
                 spec, orig = armed[eaddr - 1]
