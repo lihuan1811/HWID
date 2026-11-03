@@ -1,0 +1,91 @@
+# 在 runner 里直接分析转储（避免把 372MB 转储传回本地）
+#   1) 复现崩溃、拿到 WER 崩溃转储
+#   2) dmp2img 抽模块镜像 → 逐段熵值比较（判断"壳到底解密了没有"）
+#   3) 若已解密 → dump2exe 还原 PE → delphi_gate 找激活门
+#   4) 只上传小体积结论 + 还原后的 PE
+name: win-analyze
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/win-analyze.yml'
+      - 'tools/dmp2img.py'
+
+jobs:
+  analyze:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 依赖
+        shell: pwsh
+        run: |
+          python -m pip install --quiet capstone pyyaml
+          python -c "import capstone,sys;print('capstone',capstone.__version__,'py',sys.version)"
+
+      - name: 取 procdump
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile tools\procdump.zip
+          Expand-Archive tools\procdump.zip -DestinationPath tools -Force
+
+      - name: 采集崩溃转储
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          ./scripts/win_probe2.ps1 -Exe 'samples\HWIDMaster-0902.exe' -Procdump 'tools\procdump64.exe' -OutDir 'probe2' -EpList @() -MaxLiveSnapshots 1
+          Write-Host '--- 产出的 dump ---'
+          Get-ChildItem probe2\dumps -Filter *.dmp | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB) }
+
+      - name: 分析转储（逐段熵 = 解密了没有）
+        shell: pwsh
+        run: |
+          $dumps = Get-ChildItem probe2\dumps -Filter *.dmp | Sort-Object Length -Descending
+          if (-not $dumps) { throw '没有 dump' }
+          $crash = $dumps | Where-Object { $_.Name -like 'HWIDMaster-0902.exe.*' } | Select-Object -First 1
+          if (-not $crash) { $crash = $dumps[0] }
+          Write-Host "崩溃转储: $($crash.FullName)  $([math]::Round($crash.Length/1MB,1)) MB"
+          New-Item -ItemType Directory -Force -Path analysis | Out-Null
+          python tools/dmp2img.py --dmp "$($crash.FullName)" --base 0x400000 --size 0x54b1000 `
+                 --module HWIDMaster --out analysis/mem_crash.bin --json analysis/dmp_crash.json
+          Write-Host '=== 崩溃镜像逐段体检（熵≈8 = 仍是密文；熵≈4~6.8 = 已解密/是代码）==='
+          python tools/pe_triage.py analysis/mem_crash.bin --json analysis/triage_crash.json
+          Write-Host '=== 有没有明文线索（中文/授权关键词）==='
+          python -c "import re,sys; d=open('analysis/mem_crash.bin','rb').read(); kw=['激活','卡密','注册码','机器码','到期','license','expired','HWIDMail','搜狐','spoofer'];\nimport collections;\nhits=collections.Counter();\n[print('  GBK命中:',k) or hits.update([k]) for k in kw if k.encode('gbk',errors='ignore') in d and k.encode('gbk',errors='ignore')];\nprint('  summary:',dict(hits))"
+
+      - name: 尝试还原 PE（若镜像里已有解密代码）
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python tools/dump2exe.py --dump analysis/mem_crash.bin --base 0x400000 `
+                 --out analysis/unpacked.exe --drop-shell --report
+          Write-Host '=== 还原后体检 ==='
+          python tools/pe_triage.py analysis/unpacked.exe --json analysis/triage_unpacked.json
+          Write-Host '=== 找激活门 ==='
+          python tools/delphi_gate.py --exe analysis/unpacked.exe --json analysis/gates.json --top 30
+
+      - name: 上传结论
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyze-report
+          path: |
+            analysis/*.json
+            analysis/*.txt
+            probe2/run.log
+            probe2/modules_*.txt
+          if-no-files-found: warn
+
+      - name: 上传崩溃镜像（45MB 级，能给本地继续分析）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyze-image
+          path: |
+            analysis/mem_crash.bin
+            analysis/unpacked.exe
+          if-no-files-found: ignore
+          compression-level: 6
