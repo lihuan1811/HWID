@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 断点抓栈
+      - name: 断点抓栈 + 挂 30 秒抓全内存
         continue-on-error: true
         shell: pwsh
         run: |
@@ -26,8 +26,23 @@ jobs:
           python scripts/win_minidbg.py --exe 'samples\HWIDMaster-0902.exe' `
             --bp 'user32!MessageBoxW' --bp 'user32!MessageBoxA' `
             --bp 'kernel32!ExitProcess' --bp 'ntdll!NtTerminateProcess' `
-            --maxhits 4 --timeout 45 --json out/bp.json 2>&1 |
-            Tee-Object -FilePath out/bp.txt
+            --bp 'user32!CreateWindowExW' --bp 'user32!ShowWindow' `
+            --maxhits 6 --timeout 70 --dump-after 30 --dump-out out\late.dmp `
+            --json out/bp.json 2>&1 | Tee-Object -FilePath out/bp.txt
+
+      - name: 就地分析"续命 30 秒"的转储
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (-not (Test-Path out\late.dmp)) { Write-Host '没有 late.dmp'; exit 0 }
+          python -m pip install --quiet capstone
+          python tools/dmp2img.py --dmp out\late.dmp --base 0x400000 --size 0x54b1000 `
+                 --module HWIDMaster --out out\late_mem.bin --json out/late_dmp.json
+          python tools/decrypt_coverage.py --img out\late_mem.bin --orig samples\HWIDMaster-0902.exe --json out/late_cov.json
+          python tools/scan_plaintext.py out\late.dmp --json out/late_plain.json | Select-Object -First 40
+          python tools/dump2exe.py --dump out\late_mem.bin --base 0x400000 --out out\late_unpacked.exe --drop-shell --report
+          python tools/pe_triage.py out\late_unpacked.exe --json out/late_triage.json
+          python tools/find_string_xrefs.py --exe out\late_unpacked.exe --json out/late_xrefs.json | Select-Object -First 60
 
       - name: 上传
         if: always()
@@ -37,4 +52,6 @@ jobs:
           path: |
             out/bp.json
             out/bp.txt
+            out/*.json
+            out/late.dmp
           if-no-files-found: warn

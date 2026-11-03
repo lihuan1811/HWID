@@ -163,6 +163,34 @@ k32.ContinueDebugEvent.argtypes = [wt.DWORD, wt.DWORD, wt.DWORD]
 k32.ContinueDebugEvent.restype = wt.BOOL
 
 
+dbghelp = ctypes.WinDLL('dbghelp', use_last_error=True)
+GENERIC_WRITE = 0x40000000
+CREATE_ALWAYS = 2
+MiniDumpWithFullMemory = 0x00000002
+MiniDumpWithHandleData = 0x00000004
+
+
+def write_full_dump(hp, pid, path):
+    """用 MiniDumpWriteDump 抓全内存转储（等价 procdump -ma）"""
+    k32.CreateFileW.argtypes = [ctypes.c_wchar_p, wt.DWORD, wt.DWORD, P, wt.DWORD, wt.DWORD, P]
+    k32.CreateFileW.restype = P
+    h = k32.CreateFileW(path, GENERIC_WRITE, 0, None, CREATE_ALWAYS, 0, None)
+    if not h or h == -1:
+        print(f'[!] 建文件失败: {path} err={ctypes.get_last_error()}')
+        return False
+    dbghelp.MiniDumpWriteDump.argtypes = [P, wt.DWORD, P, wt.DWORD, P, P, P]
+    dbghelp.MiniDumpWriteDump.restype = wt.BOOL
+    ok = dbghelp.MiniDumpWriteDump(P(hp), pid, h, MiniDumpWithFullMemory | MiniDumpWithHandleData,
+                                   None, None, None)
+    k32.CloseHandle(h)
+    import os
+    if ok:
+        print(f'[+] 已写全内存转储 {path}  {os.path.getsize(path) / 1048576:.1f} MB')
+        return True
+    print(f'[!] MiniDumpWriteDump 失败 err={ctypes.get_last_error()}')
+    return False
+
+
 def rpm(hp, addr, size):
     buf = ctypes.create_string_buffer(size)
     n = ctypes.c_size_t(0)
@@ -252,6 +280,8 @@ def main():
     ap.add_argument('--timeout', type=int, default=60)
     ap.add_argument('--patch', action='append', default=[], help='RVA:HEX，可多次')
     ap.add_argument('--continue-after-patch', action='store_true')
+    ap.add_argument('--dump-after', type=int, default=0, help='运行多少秒后抓一份全内存')
+    ap.add_argument('--dump-out', default='', help='转储输出路径')
     ap.add_argument('--json')
     a = ap.parse_args()
 
@@ -364,11 +394,16 @@ def main():
 
     exited = False
     n_events = 0
+    dumped = False
     while time.time() - t0 < a.timeout and len(hits) < a.maxhits and not exited:
         n_events += 1
         if not k32.WaitForDebugEvent(ctypes.byref(ev), 500):
             time.sleep(0.01)
             continue
+        if a.dump_after and not dumped and (time.time() - t0) >= a.dump_after:
+            write_full_dump(hp, pid, a.dump_out or 'late.dmp')
+            dumped = True
+
         code = ev.dwDebugEventCode
         cont = DBG_CONTINUE
         # 每次事件都刷新模块表并尝试下断（DLL 陆续加载，user32/kernel32 出现后才能解析导出）
