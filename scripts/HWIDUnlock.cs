@@ -21,6 +21,69 @@ static class HWIDUnlock
     const int AF_INET = 2;
     const int TCP_TABLE_OWNER_PID_ALL = 5;
 
+    public class ConnRow
+    {
+        public int Pid;
+        public string RemoteIp;
+        public int RemotePort;
+        public int State;
+        public override string ToString()
+        {
+            return RemoteIp + ":" + RemotePort + " 状态=" + StateName(State);
+        }
+        public static string StateName(int st)
+        {
+            switch (st)
+            {
+                case 1: return "ESTABLISHED";
+                case 2: return "SYN_SENT";
+                case 3: return "SYN_RCVD";
+                case 4: return "FIN_WAIT1";
+                case 5: return "FIN_WAIT2";
+                case 6: return "TIME_WAIT";
+                case 7: return "CLOSE";
+                case 8: return "CLOSE_WAIT";
+                case 9: return "LAST_ACK";
+                case 10: return "LISTEN";
+                case 11: return "CLOSING";
+                default: return st.ToString();
+            }
+        }
+    }
+
+    static List<ConnRow> SniffAllConns()
+    {
+        var res = new List<ConnRow>();
+        int size = 0;
+        GetExtendedTcpTable(IntPtr.Zero, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+        if (size <= 0) return res;
+        IntPtr buf = System.Runtime.InteropServices.Marshal.AllocHGlobal(size);
+        try
+        {
+            if (GetExtendedTcpTable(buf, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) != 0)
+                return res;
+            int rows = System.Runtime.InteropServices.Marshal.ReadInt32(buf);
+            for (int i = 0; i < rows; i++)
+            {
+                IntPtr p = new IntPtr(buf.ToInt64() + 4 + i * 24);
+                uint state = (uint)System.Runtime.InteropServices.Marshal.ReadInt32(p, 0);
+                uint remote = (uint)System.Runtime.InteropServices.Marshal.ReadInt32(p, 12);
+                uint rportRaw = (uint)System.Runtime.InteropServices.Marshal.ReadInt32(p, 16);
+                int pid = System.Runtime.InteropServices.Marshal.ReadInt32(p, 20);
+                int rport = ((int)(rportRaw & 0xFFFF) & 0xFF) << 8 | ((int)(rportRaw & 0xFFFF) >> 8) & 0xFF;
+                var r = new ConnRow();
+                r.Pid = pid;
+                r.State = (int)state;
+                r.RemotePort = rport;
+                try { r.RemoteIp = new IPAddress(remote).ToString(); } catch { r.RemoteIp = "0.0.0.0"; }
+                res.Add(r);
+            }
+        }
+        catch { }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(buf); }
+        return res;
+    }
+
     // 返回 List<int> 目标端口（所有连向 ServerIp 的连接，含 SYN_SENT）
     static List<int> SniffTargetPorts()
     {
@@ -357,6 +420,10 @@ static class HWIDUnlock
         Log("已还原 IP 劫持");
     }
 
+    static int ChildPid = 0;
+    static readonly HashSet<string> SeenEndpoints = new HashSet<string>();
+    static readonly HashSet<string> AliasedIps = new HashSet<string>();
+
     static void PortSniffer()
     {
         int tick = 0;
@@ -364,6 +431,33 @@ static class HWIDUnlock
         {
             try
             {
+                // (a) 打印目标进程的所有对外连接（这是定位"它到底连谁"的关键）
+                if (ChildPid != 0)
+                {
+                    foreach (ConnRow r in SniffAllConns())
+                    {
+                        if (r.Pid != ChildPid) continue;
+                        if (r.RemoteIp == "0.0.0.0" || r.RemoteIp.StartsWith("127.") || r.RemoteIp == "::") continue;
+                        string key = r.ToString();
+                        bool isNew = false;
+                        lock (SeenEndpoints) { if (!SeenEndpoints.Contains(key)) { SeenEndpoints.Add(key); isNew = true; } }
+                        if (isNew)
+                        {
+                            Log("*** 目标程序对外连接: " + key);
+                            if (r.RemoteIp != ServerIp && !r.RemoteIp.StartsWith("10.") && !r.RemoteIp.StartsWith("192.168.") && !r.RemoteIp.StartsWith("172."))
+                            {
+                                Log("    ↑ 注意：这不是我们劫持的 " + ServerIp + " —— 说明它连了别的服务器");
+                                if (AliasedIps.Add(r.RemoteIp))
+                                {
+                                    Log("    自动把这个 IP 也劫持到本机: " + r.RemoteIp);
+                                    string ifName = FindLoopback();
+                                    RunNetsh(string.Format("interface ipv4 add address name=\"{0}\" address={1} mask=255.255.255.255", ifName, r.RemoteIp));
+                                }
+                            }
+                        }
+                    }
+                }
+
                 List<int> ports = SniffTargetPorts();
                 foreach (int p in ports)
                 {
@@ -472,7 +566,18 @@ static class HWIDUnlock
                     pi.WorkingDirectory = Path.GetDirectoryName(target);
                     pi.UseShellExecute = false;
                     var proc = Process.Start(pi);
+                    ChildPid = proc.Id;
                     Log("已拉起目标程序: " + Path.GetFileName(target) + "  PID=" + proc.Id);
+                    var watcher = new Thread(delegate ()
+                    {
+                        try
+                        {
+                            proc.WaitForExit();
+                            Log("[!] 目标程序已退出，退出码=" + proc.ExitCode + " (" + proc.ExitCode.ToString("x") + ")");
+                        }
+                        catch { }
+                    });
+                    watcher.IsBackground = true; watcher.Start();
                 }
                 catch (Exception e) { Log("拉起目标失败: " + e.Message); }
             }
