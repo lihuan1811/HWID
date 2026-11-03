@@ -21,6 +21,19 @@ pe_triage.py —— PE 静态体检 / 壳判定器
 """
 import sys, os, json, struct, math, collections
 
+# --- Windows 控制台(cp1252)打不出中文，统一把 stdout 设成 utf-8 ---
+def _utf8_stdout():
+    try:
+        import sys as _s
+        _s.stdout.reconfigure(encoding='utf-8', errors='replace')
+        _s.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+
+_utf8_stdout()
+
+
 try:
     from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 except ImportError:

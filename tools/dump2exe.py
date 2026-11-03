@@ -24,6 +24,19 @@ dump2exe.py —— 把"运行时内存转储"重建为可执行 PE（离线版 S
 """
 import sys, os, json, struct, argparse
 
+# --- Windows 控制台(cp1252)打不出中文，统一把 stdout 设成 utf-8 ---
+def _utf8_stdout():
+    try:
+        import sys as _s
+        _s.stdout.reconfigure(encoding='utf-8', errors='replace')
+        _s.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+
+_utf8_stdout()
+
+
 
 # ----------------------------------------------------------------- 工具
 def u16(b, o): return struct.unpack_from('<H', b, o)[0]

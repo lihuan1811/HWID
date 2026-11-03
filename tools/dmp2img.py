@@ -19,6 +19,19 @@ dmp2img.py —— 从 Windows 用户态内存转储(.dmp) 里抽出"某个模块
 """
 import sys, os, struct, json, argparse
 
+# --- Windows 控制台(cp1252)打不出中文，统一把 stdout 设成 utf-8 ---
+def _utf8_stdout():
+    try:
+        import sys as _s
+        _s.stdout.reconfigure(encoding='utf-8', errors='replace')
+        _s.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+
+_utf8_stdout()
+
+
 # ---- minidump 常量
 MDMP_SIG = b'MDMP'
 ST_MODULE_LIST = 4

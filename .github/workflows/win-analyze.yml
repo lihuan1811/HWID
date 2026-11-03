@@ -16,6 +16,9 @@ jobs:
   analyze:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +57,7 @@ jobs:
           Write-Host '=== 崩溃镜像逐段体检（熵≈8 = 仍是密文；熵≈4~6.8 = 已解密/是代码）==='
           python tools/pe_triage.py analysis/mem_crash.bin --json analysis/triage_crash.json
           Write-Host '=== 有没有明文线索（中文/授权关键词）==='
-          python -c "import re,sys; d=open('analysis/mem_crash.bin','rb').read(); kw=['激活','卡密','注册码','机器码','到期','license','expired','HWIDMail','搜狐','spoofer'];\nimport collections;\nhits=collections.Counter();\n[print('  GBK命中:',k) or hits.update([k]) for k in kw if k.encode('gbk',errors='ignore') in d and k.encode('gbk',errors='ignore')];\nprint('  summary:',dict(hits))"
+          python tools/scan_plaintext.py analysis/mem_crash.bin --json analysis/plain_crash.json
 
       - name: 尝试还原 PE（若镜像里已有解密代码）
         continue-on-error: true
