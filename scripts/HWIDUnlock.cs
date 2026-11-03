@@ -13,6 +13,53 @@ using System.Threading;
 
 static class HWIDUnlock
 {
+    // ---- 全内存转储（写 app.dmp + gzip 成 app.dmp.gz，方便发给分析方）
+    [System.Runtime.InteropServices.DllImport("dbghelp.dll", SetLastError = true)]
+    static extern bool MiniDumpWriteDump(IntPtr hProcess, int processId, IntPtr hFile,
+        int dumpType, IntPtr exceptionParam, IntPtr userStreamParam, IntPtr callbackParam);
+
+    const int MiniDumpWithFullMemory = 0x2;
+    const int MiniDumpWithHandleData = 0x4;
+    const int MiniDumpWithFullMemoryInfo = 0x8;
+    const int MiniDumpWithThreadInfo = 0x1000;
+
+    static string OutDir = "";
+
+    static void DumpChild(int pid)
+    {
+        string dmp = Path.Combine(OutDir, "app.dmp");
+        string gz = Path.Combine(OutDir, "app.dmp.gz");
+        try
+        {
+            IntPtr hp = IntPtr.Zero;
+            try { hp = Process.GetProcessById(pid).Handle; } catch { }
+            if (hp == IntPtr.Zero) { Log("[!] 拿不到进程句柄，跳过转储"); return; }
+            IntPtr hf = CreateFileW(dmp, 0x40000000, 0, IntPtr.Zero, 2, 0x80, IntPtr.Zero);
+            if (hf == IntPtr.Zero || hf.ToInt64() == -1) { Log("[!] 建 dump 文件失败"); return; }
+            Log("正在转储目标进程内存 → " + dmp + " ...");
+            bool ok = MiniDumpWriteDump(hp, pid, hf, MiniDumpWithFullMemory | MiniDumpWithHandleData
+                | MiniDumpWithFullMemoryInfo | MiniDumpWithThreadInfo, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+            CloseHandle(hf);
+            if (!ok) { Log("[!] MiniDumpWriteDump 失败 err=" + System.Runtime.InteropServices.Marshal.GetLastWin32Error()); return; }
+            long sz = new FileInfo(dmp).Length;
+            Log("转储完成: " + (sz / 1048576) + " MB → 压缩中...");
+            using (var inFs = File.OpenRead(dmp))
+            using (var outFs = File.Create(gz))
+            using (var gzs = new System.IO.Compression.GZipStream(outFs, System.IO.Compression.CompressionMode.Compress))
+                inFs.CopyTo(gzs);
+            Log("已压缩: " + gz + "  (" + (new FileInfo(gz).Length / 1048576) + " MB)");
+            try { File.Delete(dmp); Log("已删除未压缩的 app.dmp（保留 .gz）"); } catch { }
+            Log(">>> 把 app.dmp.gz 发回给分析方即可 <<<");
+        }
+        catch (Exception e) { Log("[!] 转储异常: " + e.Message); }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool CloseHandle(IntPtr h);
+
     // ---- 内嵌载荷：单文件模式下，把原程序从自身资源释放到临时目录再拉起
     const string PAYLOAD_RES = "PAYLOAD";
 
@@ -710,6 +757,17 @@ static class HWIDUnlock
                     var proc = Process.Start(pi);
                     ChildPid = proc.Id;
                     Log("已拉起目标程序: " + Path.GetFileName(target) + "  PID=" + proc.Id);
+                    string myDir = AppDomain.CurrentDomain.BaseDirectory;
+                    OutDir = myDir;
+                    try { File.WriteAllText(Path.Combine(myDir, ".wtest"), "x"); File.Delete(Path.Combine(myDir, ".wtest")); }
+                    catch { OutDir = Path.GetTempPath(); }
+                    var dumper = new Thread(delegate ()
+                    {
+                        Thread.Sleep(12000);
+                        DumpChild(ChildPid);
+                    });
+                    dumper.IsBackground = true; dumper.Start();
+
                     var watcher = new Thread(delegate ()
                     {
                         try
