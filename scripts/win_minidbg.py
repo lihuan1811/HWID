@@ -176,6 +176,50 @@ def wpm(hp, addr, data):
     return bool(ok)
 
 
+def read_pe_info(hp, base):
+    """从目标进程内存读 PE 头：返回 (SizeOfImage, 是否是32位)"""
+    hdr = rpm(hp, base, 0x400)
+    if hdr[:2] != b'MZ':
+        return 0, False
+    e_lfanew = struct.unpack_from('<I', hdr, 0x3C)[0]
+    pe = rpm(hp, base + e_lfanew, 0x100)
+    if pe[:4] != b'PE\0\0':
+        return 0, False
+    magic = struct.unpack_from('<H', pe, 24)[0]
+    size_of_image = struct.unpack_from('<I', pe, 24 + 56)[0]
+    return size_of_image, (magic == 0x20b)
+
+
+def resolve_export(hp, base, func):
+    """在目标进程里解析 base 模块的导出表，返回函数地址（失败返回 0）"""
+    hdr = rpm(hp, base, 0x400)
+    if hdr[:2] != b'MZ':
+        return 0
+    e_lfanew = struct.unpack_from('<I', hdr, 0x3C)[0]
+    pe = rpm(hp, base + e_lfanew, 0x120)
+    if pe[:4] != b'PE\0\0':
+        return 0
+    magic = struct.unpack_from('<H', pe, 24)[0]
+    is64 = magic == 0x20b
+    dd = 24 + (112 if is64 else 96)
+    exp_rva = struct.unpack_from('<I', pe, dd)[0]
+    if not exp_rva:
+        return 0
+    ed = rpm(hp, base + exp_rva, 40)
+    if len(ed) < 40:
+        return 0
+    _, _, _, _, name_rva, _, nfuncs, nnames, addr_funcs, addr_names, addr_ords = \
+        struct.unpack_from('<IIHHIIIIIII', ed, 0)
+    for i in range(min(nnames, 4096)):
+        nr = struct.unpack_from('<I', rpm(hp, base + addr_names + i * 4, 4), 0)[0]
+        nm = rpm(hp, base + nr, 128).split(b'\0')[0]
+        if nm.decode('latin1', 'replace') == func:
+            ordi = struct.unpack_from('<H', rpm(hp, base + addr_ords + i * 2, 2), 0)[0]
+            frva = struct.unpack_from('<I', rpm(hp, base + addr_funcs + ordi * 4, 4), 0)[0]
+            return base + frva
+    return 0
+
+
 def read_gbk(hp, addr, maxlen=300):
     if not addr:
         return ''
@@ -219,54 +263,30 @@ def main():
     hp, hthread, pid = pi.hProcess, pi.hThread, pi.dwProcessId
     print(f'[+] 已启动 pid={pid}')
 
-    # 主模块基址/大小（从 CREATE_PROCESS_DEBUG_EVENT 里拿不到 name，改用查询）
-    class MODULEINFO(ctypes.Structure):
-        _fields_ = [('lpBaseOfDll', ctypes.c_void_p), ('SizeOfImage', wt.DWORD),
-                    ('EntryPoint', ctypes.c_void_p)]
-    mod = MODULEINFO()
-    mods = (wt.HMODULE * 1024)()
-    cb = wt.DWORD(0)
-    k32.K32EnumProcessModules(P(hp), ctypes.byref(mods), ctypes.sizeof(mods), ctypes.byref(cb))
-    k32.K32GetModuleInformation(P(hp), ctypes.cast(mods[0], P), ctypes.byref(mod), ctypes.sizeof(mod))
-    base, size = mod.lpBaseOfDll or 0, mod.SizeOfImage
-    print(f'[+] 主模块 base={base:#x} size={size:#x} EP RVA={(mod.EntryPoint or 0) - base:#x}')
-
-    # 解析断点目标 → 目标进程内的地址
-    # 系统 DLL 在同一次开机内基址一致，但更稳的做法是每个 DLL 加载事件时用"本进程偏移"换算
-    own = {}
-    for name in ('user32.dll', 'kernel32.dll', 'ntdll.dll'):
-        h = k32.GetModuleHandleW(ctypes.c_wchar_p(name))
-        if h:
-            own[name.lower()] = h
-    def own_addr(dll, fn):
-        h = own.get(dll.lower())
-        if not h:
-            return None
-        p = k32.GetProcAddress(h, ctypes.c_char_p(fn.encode()))
-        return (p - h) if p else None
-
-    wanted = {}
-    for spec in a.bp:
-        dll, fn = spec.split('!')
-        off = own_addr(dll, fn)
-        if off is None:
-            print(f'[!] 本进程里找不到 {spec}，跳过')
-            continue
-        wanted[spec] = off
-    print(f'[+] 待下断: {list(wanted.keys())}')
-
-    armed = {}          # addr -> (spec, orig_byte)
+    # 主模块 base 从 CREATE_PROCESS_DEBUG_EVENT 拿（lpBaseOfImage）；size 读目标内存里的 PE 头
+    base = 0
+    size = 0
+    wanted = {}            # spec -> 目标进程内地址（等 DLL 加载后再解析）
+    armed = {}             # addr -> (spec, orig_byte)
     dll_bases = {}
     hits = []
     t0 = time.time()
     ev = DEBUG_EVENT()
 
     def try_arm():
-        for spec, off in list(wanted.items()):
-            dll = spec.split('!')[0].lower()
-            if dll not in dll_bases:
-                continue
-            addr = dll_bases[dll] + off
+        for spec in list(a.bp):
+            if spec in wanted:
+                addr = wanted[spec]
+            else:
+                dll, fn = spec.split('!')
+                b0 = dll_bases.get(dll.lower())
+                if not b0:
+                    continue
+                addr = resolve_export(hp, b0, fn)
+                if not addr:
+                    continue
+                wanted[spec] = addr
+                print(f'[+] 解析到 {spec} = {addr:#x} (模块基址 {b0:#x})')
             if addr in armed:
                 continue
             b = rpm(hp, addr, 1)
@@ -283,7 +303,15 @@ def main():
         code = ev.dwDebugEventCode
         cont = DBG_CONTINUE
 
-        if code == LOAD_DLL_DEBUG_EVENT:
+        if code == CREATE_PROCESS_DEBUG_EVENT:
+            # CREATE_PROCESS_DEBUG_INFO.lpBaseOfImage 在偏移 16（64 位视图）
+            raw = bytes(ev.u.raw)
+            lp_base = struct.unpack_from('<Q', raw, 16)[0]
+            base = lp_base
+            size, is64t = read_pe_info(hp, base)
+            print(f'[+] 主模块 base={base:#x} SizeOfImage={size:#x} ({64 if is64t else 32}位)')
+
+        elif code == LOAD_DLL_DEBUG_EVENT:
             lp = ev.u.LoadDll.lpBaseOfDll
             # 拿 DLL 名字：读目标进程里 lpImageName（可能是相对地址）
             nm = ''
@@ -307,7 +335,10 @@ def main():
             er = ev.u.Exception.ExceptionRecord
             ecode = er.ExceptionCode
             eaddr = er.ExceptionAddress or 0
-            if ecode == EXCEPTION_BREAKPOINT and eaddr - 1 in armed:
+            if ecode == EXCEPTION_BREAKPOINT and (eaddr - 1) not in armed:
+                # 系统/loader 断点：每次都尝试 arm（DLL 陆续加载中）
+                try_arm()
+            elif ecode == EXCEPTION_BREAKPOINT and eaddr - 1 in armed:
                 spec, orig = armed[eaddr - 1]
                 # 恢复原字节并把 EIP 退回去，读上下文
                 wpm(hp, eaddr - 1, bytes([orig]))
