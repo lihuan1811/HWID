@@ -144,6 +144,8 @@ k32.Wow64GetThreadContext.argtypes = [P, ctypes.POINTER(WOW64_CONTEXT)]
 k32.Wow64GetThreadContext.restype = wt.BOOL
 k32.K32EnumProcessModules.argtypes = [P, P, wt.DWORD, ctypes.POINTER(wt.DWORD)]
 k32.K32EnumProcessModules.restype = wt.BOOL
+k32.K32GetModuleBaseNameW.argtypes = [P, P, ctypes.c_wchar_p, wt.DWORD]
+k32.K32GetModuleBaseNameW.restype = wt.DWORD
 k32.K32GetModuleInformation.argtypes = [P, P, P, wt.DWORD]
 k32.K32GetModuleInformation.restype = wt.BOOL
 k32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
@@ -274,6 +276,24 @@ def main():
     t0 = time.time()
     ev = DEBUG_EVENT()
 
+    def refresh_modules():
+        """枚举目标进程所有模块 → dll_bases（name→base）"""
+        mods = (wt.HMODULE * 2048)()
+        cb = wt.DWORD(0)
+        if not k32.K32EnumProcessModules(P(hp), ctypes.byref(mods), ctypes.sizeof(mods), ctypes.byref(cb)):
+            return 0
+        n = cb.value // ctypes.sizeof(wt.HMODULE)
+        for i in range(n):
+            h = mods[i]
+            if not h:
+                continue
+            buf = ctypes.create_unicode_buffer(260)
+            ln = k32.K32GetModuleBaseNameW(P(hp), ctypes.cast(h, P), buf, 260)
+            if ln:
+                name = buf.value.lower()
+                dll_bases[name] = ctypes.cast(h, P).value or 0
+        return n
+
     def try_arm():
         for spec in list(a.bp):
             if spec in wanted:
@@ -326,6 +346,8 @@ def main():
                 pass
             if nm:
                 dll_bases.setdefault(nm.lower().split('\\')[-1], lp)
+            if not dll_bases:
+                refresh_modules()
             try_arm()
 
         elif code == EXCEPTION_DEBUG_EVENT:
@@ -352,6 +374,10 @@ def main():
                                   f'EP RVA={(mod.EntryPoint or 0) - base:#x}')
                     except Exception as ex:
                         print(f'[!] 取模块信息失败: {ex}')
+                if not dll_bases:
+                    nmod = refresh_modules()
+                    print(f'[+] 已枚举 {nmod} 个模块；user32={"user32.dll" in dll_bases} '
+                          f'kernel32={"kernel32.dll" in dll_bases} ntdll={"ntdll.dll" in dll_bases}')
                 try_arm()
             elif ecode == EXCEPTION_BREAKPOINT and eaddr - 1 in armed:
                 spec, orig = armed[eaddr - 1]
