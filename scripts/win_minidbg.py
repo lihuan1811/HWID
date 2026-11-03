@@ -425,12 +425,8 @@ def main():
                     if wpm(hp, base + rva, data):
                         print(f'  [patch] RVA {rva:#x} ← {data.hex()}')
                 if not a.continue_after_patch:
-                    print(f'[dbg] 退出循环 elapsed={time.time() - t0:.1f}s 迭代={n_events} exited={exited} '
-          f'hits={len(hits)} armed={len(armed)} 模块={len(dll_bases)}')
-    k32.TerminateProcess(P(hp), 0)
-                    cont = DBG_CONTINUE
-                else:
-                    cont = DBG_CONTINUE
+                    k32.TerminateProcess(P(hp), 0)
+                cont = DBG_CONTINUE
             elif ecode == EXCEPTION_ACCESS_VIOLATION:
                 ht = k32.OpenThread(THREAD_ALL_ACCESS, False, ev.dwThreadId)
                 ctx = WOW64_CONTEXT(); ctx.ContextFlags = 0x10007
