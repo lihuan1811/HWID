@@ -38,6 +38,11 @@ ST_MODULE_LIST = 4
 ST_MEMORY_LIST = 5
 ST_EXCEPTION = 6
 ST_MEMORY64_LIST = 9
+ST_THREAD_LIST = 3
+
+# x86 CONTEXT 里 Eip/Esp/Ebp 的偏移
+CTX_X86 = dict(eip=0xB8, esp=0xC4, ebp=0xB4, eax=0xB0, ecx=0xAC, edx=0xA8)
+CTX_X64 = dict(rip=0xF8, rsp=0x98, rbp=0xA0, rax=0xB0, rcx=0xA8, rdx=0xA0)
 
 
 class Dmp:
@@ -115,6 +120,42 @@ class Dmp:
         out.sort()
         return out
 
+    # ---- 线程列表：取每个线程的 TEB/栈/上下文位置
+    def threads(self):
+        if ST_THREAD_LIST not in self.streams:
+            return []
+        _, rva = self.streams[ST_THREAD_LIST]
+        n = struct.unpack_from('<I', self.d, rva)[0]
+        out = []
+        for i in range(n):
+            o = rva + 4 + i * 48
+            tid = struct.unpack_from('<I', self.d, o)[0]
+            stack_start = struct.unpack_from('<Q', self.d, o + 24)[0]
+            stack_size = struct.unpack_from('<I', self.d, o + 32)[0]
+            ctx_size = struct.unpack_from('<I', self.d, o + 36)[0]
+            ctx_rva = struct.unpack_from('<I', self.d, o + 40)[0]
+            out.append(dict(tid=tid, stack_start=stack_start, stack_size=stack_size,
+                            ctx_size=ctx_size, ctx_rva=ctx_rva))
+        return out
+
+    def context_of(self, th, is64=False):
+        """从 CONTEXT 结构里取 pc/sp/bp（x86 取 Eip/Esp，x64 取 Rip/Rsp）"""
+        if not th['ctx_size'] or not th['ctx_rva']:
+            return None
+        off = th['ctx_rva']
+        if off + 0x100 > len(self.d):
+            return None
+        try:
+            if is64:
+                return dict(pc=struct.unpack_from('<Q', self.d, off + CTX_X64['rip'])[0],
+                            sp=struct.unpack_from('<Q', self.d, off + CTX_X64['rsp'])[0],
+                            bp=struct.unpack_from('<Q', self.d, off + CTX_X64['rbp'])[0])
+            return dict(pc=struct.unpack_from('<I', self.d, off + CTX_X86['eip'])[0],
+                        sp=struct.unpack_from('<I', self.d, off + CTX_X86['esp'])[0],
+                        bp=struct.unpack_from('<I', self.d, off + CTX_X86['ebp'])[0])
+        except Exception:
+            return None
+
     def read_at(self, addr, length, ranges=None):
         """从内存镜像里按虚拟地址读（跨区间拼）"""
         ranges = ranges or self.ranges()
@@ -185,7 +226,37 @@ def main():
     else:
         print('[i] 没按名字匹配到模块，仍按 --base 直接取内存')
 
-    ranges = dmp.ranges()
+    # ---- 线程上下文 + 栈回溯（找"崩在模块里哪一段"）
+    is64 = False
+    ths = dmp.threads()
+    ranges0 = dmp.ranges()
+    ex_tid = ex['thread_id'] if ex else None
+    rep['threads'] = len(ths)
+    if ths:
+        # 判断位数：看 pc 或模块基址的形态，用栈大小做保守判断
+        main = next((t for t in ths if t['tid'] == ex_tid), ths[0])
+        c = dmp.context_of(main, is64)
+        if c:
+            print(f'[+] 主线程 pid={main["tid"]}  PC={c["pc"]:#x}  SP={c["sp"]:#x}  BP={c["bp"]:#x}'
+                  f'   → PC RVA={c["pc"] - a.base:#x}' if c['pc'] > a.base else '')
+            rep['main_thread'] = dict(tid=main['tid'], pc=hex(c['pc']), sp=hex(c['sp']), bp=hex(c['bp']),
+                                      pc_rva=hex(c['pc'] - a.base) if c['pc'] > a.base else '?')
+            # 栈回溯：把栈上落在 [base, base+size) 的值当候选返回地址
+            try:
+                stack = dmp.read_at(c['sp'], min(main['stack_size'] or 0x40000, 0x40000), ranges0)
+                cands = []
+                for i in range(0, len(stack) - 4, 4):
+                    v = struct.unpack_from('<I', stack, i)[0]
+                    if a.base <= v < a.base + a.size:
+                        cands.append((c['sp'] + i, v, v - a.base))
+                rep['stack_returns'] = [dict(slot=hex(x), va=hex(v), rva=hex(r)) for x, v, r in cands[:40]]
+                print(f'[+] 栈上落在模块内的候选返回地址 {len(cands)} 个（前 15）:')
+                for x, v, r in cands[:15]:
+                    print(f'    [esp+{x - c["sp"]:#06x}] {v:#010x}  RVA={r:#08x}')
+            except Exception as e:
+                print(f'[i] 栈读取失败: {e}')
+
+    ranges = ranges0
     rep['mem_ranges'] = len(ranges)
     print(f'[+] 内存区间 {len(ranges)} 个，总覆盖 {sum(r[1] for r in ranges) / 1048576:.1f} MB')
 

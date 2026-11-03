@@ -1,0 +1,91 @@
+# 深度分析：多时间点转储 + 崩溃点定位 + 解密进度对比
+#   live1(≈2s) / live2(≈5s) / crash(崩溃瞬间)
+#   对每个转储：抽模块镜像 → 逐段熵（解密进度）+ 明文扫描（含堆栈里的 UI 文案/URL）
+#   + 主线程 PC 与栈回溯（崩在模块内哪一段）
+name: win-deep
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/win-deep.yml'
+      - 'tools/dmp2img.py'
+      - 'tools/scan_plaintext.py'
+
+jobs:
+  deep:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 依赖
+        shell: pwsh
+        run: |
+          python -m pip install --quiet capstone
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile tools\procdump.zip
+          Expand-Archive tools\procdump.zip -DestinationPath tools -Force
+
+      - name: 采集（2s / 5s 快照 + 崩溃转储）
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          ./scripts/win_probe2.ps1 -Exe 'samples\HWIDMaster-0902.exe' -Procdump 'tools\procdump64.exe' `
+            -OutDir 'probe3' -EpList @() -LiveSnapshotSeconds 2 -MaxLiveSnapshots 2
+          Get-ChildItem probe3\dumps -Filter *.dmp | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB) }
+
+      - name: 逐个转储分析
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path deep | Out-Null
+          $i = 0
+          foreach ($dmp in (Get-ChildItem probe3\dumps -Filter *.dmp | Sort-Object LastWriteTime)) {
+            $i++
+            $tag = "{0}_{1}" -f $i, ($dmp.BaseName -replace '[^\w\-]', '_')
+            Write-Host "`n=========== [$tag] $($dmp.Name) $([math]::Round($dmp.Length/1MB,1)) MB ==========="
+            New-Item -ItemType Directory -Force -Path "deep\$tag" | Out-Null
+            try {
+              python tools/dmp2img.py --dmp "$($dmp.FullName)" --base 0x400000 --size 0x54b1000 `
+                     --module HWIDMaster --out "deep\$tag\mem.bin" --json "deep\$tag\dmp.json"
+            } catch { Write-Host "  dmp2img 失败: $_" }
+            if (Test-Path "deep\$tag\mem.bin") {
+              Write-Host '--- 段熵（=解密进度）---'
+              python tools/pe_triage.py "deep\$tag\mem.bin" --json "deep\$tag\triage.json" | Select-String '熵|判定|EP '
+              Write-Host '--- 整包明文扫描（含堆/栈）---'
+              python tools/scan_plaintext.py "$($dmp.FullName)" --json "deep\$tag\plain_dmp.json" |
+                Select-String '关键词命中|GBK 中文串|可读度|·'  | Select-Object -First 40
+              Remove-Item "deep\$tag\mem.bin" -Force
+            }
+            # 转储太大，先删掉，避免占满磁盘
+            Remove-Item $dmp.FullName -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: 汇总
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host '=== 汇总：每个转储的段熵 + 关键词 ==='
+          Get-ChildItem deep -Directory | ForEach-Object {
+            $t = $_.Name
+            if (Test-Path "$($_.FullName)\dmp.json") {
+              $ex = Get-Content "$($_.FullName)\dmp.json" -Raw | ConvertFrom-Json
+              Write-Host ("[{0}] 异常={1} 主线程PC={2}" -f $t, $ex.exception.name, $ex.main_thread.pc)
+            }
+            if (Test-Path "$($_.FullName)\plain_dmp.json") {
+              $p = Get-Content "$($_.FullName)\plain_dmp.json" -Raw | ConvertFrom-Json
+              Write-Host ("    关键词: {0}" -f (($p.keyword_hits.PSObject.Properties.Name) -join ', '))
+              Write-Host ("    GBK串样例: {0}" -f (($p.gbk_strings | Select-Object -First 6) -join ' | '))
+            }
+          }
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deep-report
+          path: deep/**/*.json
+          if-no-files-found: warn
