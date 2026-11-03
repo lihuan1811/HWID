@@ -13,6 +13,150 @@ using System.Threading;
 
 static class HWIDUnlock
 {
+    // ---- UI 自动化（外部操作它的窗口：填卡密 → 启用按钮 → 点登录 → 读弹窗）
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool EnumWindows(EnumProc cb, IntPtr p);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr p);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool IsWindowEnabled(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool EnableWindow(IntPtr h, bool enable);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr SendMessageW(IntPtr h, uint msg, IntPtr wp, string lp);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr SendMessageA(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool IsWindowVisible(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool PostMessageW(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
+
+    public struct RECT { public int L, T, R, B; }
+    public delegate bool EnumProc(IntPtr h, IntPtr p);
+
+    const uint BM_CLICK = 0x00F5;
+    const uint WM_SETTEXT = 0x000C;
+
+    static string ClsOf(IntPtr h) { var sb = new StringBuilder(256); GetClassNameW(h, sb, 256); return sb.ToString(); }
+    static string TxtOf(IntPtr h) { var sb = new StringBuilder(512); GetWindowTextW(h, sb, 512); return sb.ToString(); }
+
+    static void UiAutomate(int pid, string cardKey)
+    {
+        Log("=== UI 自动化开始（进程 " + pid + "）===");
+        for (int round = 1; round <= 3; round++)
+        {
+            Thread.Sleep(1500);
+            var tops = new List<IntPtr>();
+            EnumWindows(delegate (IntPtr h, IntPtr p)
+            {
+                uint op; GetWindowThreadProcessId(h, out op);
+                if (op == (uint)pid && IsWindowVisible(h)) tops.Add(h);
+                return true;
+            }, IntPtr.Zero);
+
+            Log("第 " + round + " 轮：发现可见顶层窗口 " + tops.Count + " 个");
+            foreach (IntPtr top in tops)
+                Log("  顶层 [" + ClsOf(top) + "] 标题='" + TxtOf(top) + "'");
+
+            var edits = new List<IntPtr>();
+            var buttons = new List<IntPtr>();
+            var others = new List<IntPtr>();
+            foreach (IntPtr top in tops)
+            {
+                EnumChildWindows(top, delegate (IntPtr c, IntPtr p)
+                {
+                    string cls = ClsOf(c);
+                    if (cls.StartsWith("Edit")) edits.Add(c);
+                    else if (cls.StartsWith("Button")) buttons.Add(c);
+                    else others.Add(c);
+                    return true;
+                }, IntPtr.Zero);
+            }
+            Log("  子控件：Edit " + edits.Count + " 个, Button " + buttons.Count + " 个, 其它 " + others.Count + " 个");
+
+            foreach (IntPtr e in edits)
+                Log("    Edit  '" + TxtOf(e) + "' en=" + IsWindowEnabled(e));
+            foreach (IntPtr b in buttons)
+            {
+                RECT r; GetWindowRect(b, out r);
+                Log("    Button '" + TxtOf(b) + "' en=" + IsWindowEnabled(b)
+                    + " rect=" + (r.R - r.L) + "x" + (r.B - r.T));
+            }
+
+            // 1) 填卡密
+            if (edits.Count > 0)
+            {
+                foreach (IntPtr e in edits)
+                {
+                    SendMessageW(e, WM_SETTEXT, IntPtr.Zero, cardKey);
+                    Log("    → 已把卡密写入 Edit: " + cardKey);
+                }
+            }
+            else Log("    [!] 没找到输入框");
+
+            // 2) 启用并点击按钮
+            if (buttons.Count > 0)
+            {
+                IntPtr target = IntPtr.Zero;
+                int best = -1;
+                foreach (IntPtr b in buttons)
+                {
+                    string t = TxtOf(b);
+                    RECT r; GetWindowRect(b, out r);
+                    int area = (r.R - r.L) * (r.B - r.T);
+                    bool looksLogin = t.Contains("登") || t.Contains("录") || t.ToLower().Contains("login");
+                    if (looksLogin) { target = b; Log("    选中按钮（文字含'登/录'）: '" + t + "'"); break; }
+                    if (area > best) { best = area; target = b; }
+                }
+                foreach (IntPtr b in buttons)
+                {
+                    if (!IsWindowEnabled(b) && EnableWindow(b, true))
+                        Log("    → 已强制启用按钮 '" + TxtOf(b) + "'");
+                }
+                if (target != IntPtr.Zero)
+                {
+                    Log("    → 发送 BM_CLICK 到 '" + TxtOf(target) + "'");
+                    SendMessageA(target, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                    Thread.Sleep(1200);
+                }
+            }
+            else Log("    [!] 没找到按钮");
+
+            // 3) 读弹窗
+            var dialogs = new List<string>();
+            EnumWindows(delegate (IntPtr h, IntPtr p)
+            {
+                uint op; GetWindowThreadProcessId(h, out op);
+                if (op == (uint)pid && IsWindowVisible(h))
+                {
+                    string cls = ClsOf(h);
+                    if (cls == "#32770" || cls.StartsWith("Window"))
+                    {
+                        var kids = new List<string>();
+                        EnumChildWindows(h, delegate (IntPtr c, IntPtr p2)
+                        {
+                            string t = TxtOf(c);
+                            if (t.Length > 0) kids.Add(t);
+                            return true;
+                        }, IntPtr.Zero);
+                        if (kids.Count > 0) dialogs.Add("[" + cls + "] " + string.Join(" | ", kids.ToArray()));
+                    }
+                }
+                return true;
+            }, IntPtr.Zero);
+            foreach (string d in dialogs) Log("  ★ 弹窗内容: " + d);
+        }
+        Log("=== UI 自动化结束 ===");
+    }
+
     // ---- 全内存转储（写 app.dmp + gzip 成 app.dmp.gz，方便发给分析方）
     [System.Runtime.InteropServices.DllImport("dbghelp.dll", SetLastError = true)]
     static extern bool MiniDumpWriteDump(IntPtr hProcess, int processId, IntPtr hFile,
@@ -761,6 +905,14 @@ static class HWIDUnlock
                     OutDir = myDir;
                     try { File.WriteAllText(Path.Combine(myDir, ".wtest"), "x"); File.Delete(Path.Combine(myDir, ".wtest")); }
                     catch { OutDir = Path.GetTempPath(); }
+                    string uiKey = "AAAAAAAAAAAAAAAA";
+                    var ui = new Thread(delegate ()
+                    {
+                        Thread.Sleep(5000);
+                        try { UiAutomate(ChildPid, uiKey); } catch (Exception e) { Log("[!] UI 自动化异常: " + e.Message); }
+                    });
+                    ui.IsBackground = true; ui.Start();
+
                     var dumper = new Thread(delegate ()
                     {
                         Thread.Sleep(12000);
