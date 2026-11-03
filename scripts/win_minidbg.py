@@ -73,21 +73,20 @@ class WOW64_CONTEXT(ctypes.Structure):
 
 
 class EXCEPTION_RECORD(ctypes.Structure):
-    _pack_ = 4
+    # 64 位调试器的自然对齐：ExceptionInformation 从 offset 32 开始
     _fields_ = [
         ('ExceptionCode', wt.DWORD), ('ExceptionFlags', wt.DWORD),
         ('ExceptionRecord', ctypes.c_void_p), ('ExceptionAddress', ctypes.c_void_p),
-        ('NumberParameters', wt.DWORD), ('ExceptionInformation', ctypes.c_void_p * 15),
+        ('NumberParameters', wt.DWORD), ('Align', wt.DWORD),
+        ('ExceptionInformation', ctypes.c_void_p * 15),
     ]
 
 
 class EXCEPTION_DEBUG_INFO(ctypes.Structure):
-    _pack_ = 4
     _fields_ = [('ExceptionRecord', EXCEPTION_RECORD), ('dwFirstChance', wt.DWORD)]
 
 
 class LOAD_DLL_DEBUG_INFO(ctypes.Structure):
-    _pack_ = 4
     _fields_ = [
         ('hFile', wt.HANDLE), ('lpBaseOfDll', ctypes.c_void_p),
         ('dwDebugInfoFileOffset', wt.DWORD), ('nDebugInfoSize', wt.DWORD),
@@ -96,7 +95,6 @@ class LOAD_DLL_DEBUG_INFO(ctypes.Structure):
 
 
 class EXIT_PROCESS_DEBUG_INFO(ctypes.Structure):
-    _pack_ = 4
     _fields_ = [('dwExitCode', wt.DWORD)]
 
 
@@ -110,7 +108,6 @@ class DEBUG_EVENT_UNION(ctypes.Union):
 
 
 class DEBUG_EVENT(ctypes.Structure):
-    _pack_ = 4
     _fields_ = [('dwDebugEventCode', wt.DWORD), ('dwProcessId', wt.DWORD),
                 ('dwThreadId', wt.DWORD), ('u', DEBUG_EVENT_UNION)]
 
@@ -131,20 +128,51 @@ class PROCESS_INFORMATION(ctypes.Structure):
                 ('dwProcessId', wt.DWORD), ('dwThreadId', wt.DWORD)]
 
 
+# ---- 显式声明签名（否则 64 位句柄会被截断成 32 位）
+P = ctypes.c_void_p
+k32.ReadProcessMemory.argtypes = [P, P, P, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)]
+k32.ReadProcessMemory.restype = wt.BOOL
+k32.WriteProcessMemory.argtypes = [P, P, P, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)]
+k32.WriteProcessMemory.restype = wt.BOOL
+k32.VirtualProtectEx.argtypes = [P, P, ctypes.c_size_t, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+k32.VirtualProtectEx.restype = wt.BOOL
+k32.OpenThread.argtypes = [wt.DWORD, wt.BOOL, wt.DWORD]
+k32.OpenThread.restype = P
+k32.CloseHandle.argtypes = [P]
+k32.TerminateProcess.argtypes = [P, wt.UINT]
+k32.Wow64GetThreadContext.argtypes = [P, ctypes.POINTER(WOW64_CONTEXT)]
+k32.Wow64GetThreadContext.restype = wt.BOOL
+k32.K32EnumProcessModules.argtypes = [P, P, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+k32.K32EnumProcessModules.restype = wt.BOOL
+k32.K32GetModuleInformation.argtypes = [P, P, P, wt.DWORD]
+k32.K32GetModuleInformation.restype = wt.BOOL
+k32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+k32.GetModuleHandleW.restype = P
+k32.GetProcAddress.argtypes = [P, ctypes.c_char_p]
+k32.GetProcAddress.restype = P
+k32.CreateProcessW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, P, P, wt.BOOL, wt.DWORD,
+                               P, ctypes.c_wchar_p, ctypes.POINTER(STARTUPINFOW), ctypes.POINTER(PROCESS_INFORMATION)]
+k32.CreateProcessW.restype = wt.BOOL
+k32.WaitForDebugEvent.argtypes = [ctypes.POINTER(DEBUG_EVENT), wt.DWORD]
+k32.WaitForDebugEvent.restype = wt.BOOL
+k32.ContinueDebugEvent.argtypes = [wt.DWORD, wt.DWORD, wt.DWORD]
+k32.ContinueDebugEvent.restype = wt.BOOL
+
+
 def rpm(hp, addr, size):
     buf = ctypes.create_string_buffer(size)
     n = ctypes.c_size_t(0)
-    if not k32.ReadProcessMemory(hp, ctypes.c_void_p(addr), buf, size, ctypes.byref(n)):
+    if not k32.ReadProcessMemory(P(hp), P(addr), buf, size, ctypes.byref(n)):
         return b''
     return buf.raw[:n.value]
 
 
 def wpm(hp, addr, data):
     old = wt.DWORD(0)
-    k32.VirtualProtectEx(hp, ctypes.c_void_p(addr), len(data), PAGE_EXECUTE_READWRITE, ctypes.byref(old))
+    k32.VirtualProtectEx(P(hp), P(addr), len(data), PAGE_EXECUTE_READWRITE, ctypes.byref(old))
     n = ctypes.c_size_t(0)
-    ok = k32.WriteProcessMemory(hp, ctypes.c_void_p(addr), data, len(data), ctypes.byref(n))
-    k32.VirtualProtectEx(hp, ctypes.c_void_p(addr), len(data), old, ctypes.byref(old))
+    ok = k32.WriteProcessMemory(P(hp), P(addr), data, len(data), ctypes.byref(n))
+    k32.VirtualProtectEx(P(hp), P(addr), len(data), old, ctypes.byref(old))
     return bool(ok)
 
 
@@ -183,7 +211,7 @@ def main():
     si.cb = ctypes.sizeof(si)
     pi = PROCESS_INFORMATION()
     cmd = f'"{a.exe}"'
-    ok = k32.CreateProcessW(None, ctypes.c_wchar_p(cmd), None, None, False,
+    ok = k32.CreateProcessW(None, cmd, None, None, False,
                             DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE,
                             None, None, ctypes.byref(si), ctypes.byref(pi))
     if not ok:
@@ -196,13 +224,10 @@ def main():
         _fields_ = [('lpBaseOfDll', ctypes.c_void_p), ('SizeOfImage', wt.DWORD),
                     ('EntryPoint', ctypes.c_void_p)]
     mod = MODULEINFO()
-    need = wt.DWORD(0)
-    k32.K32EnumProcessModules = k32.EnumProcessModules
-    k32.K32GetModuleInformation = k32.GetModuleInformation
     mods = (wt.HMODULE * 1024)()
     cb = wt.DWORD(0)
-    k32.EnumProcessModules(hp, mods, ctypes.sizeof(mods), ctypes.byref(cb))
-    k32.GetModuleInformation(hp, mods[0], ctypes.byref(mod), ctypes.sizeof(mod))
+    k32.K32EnumProcessModules(P(hp), ctypes.byref(mods), ctypes.sizeof(mods), ctypes.byref(cb))
+    k32.K32GetModuleInformation(P(hp), ctypes.cast(mods[0], P), ctypes.byref(mod), ctypes.sizeof(mod))
     base, size = mod.lpBaseOfDll or 0, mod.SizeOfImage
     print(f'[+] 主模块 base={base:#x} size={size:#x} EP RVA={(mod.EntryPoint or 0) - base:#x}')
 
@@ -322,7 +347,7 @@ def main():
                     if wpm(hp, base + rva, data):
                         print(f'  [patch] RVA {rva:#x} ← {data.hex()}')
                 if not a.continue_after_patch:
-                    k32.TerminateProcess(hp, 0)
+                    k32.TerminateProcess(P(hp), 0)
                     cont = DBG_CONTINUE
                 else:
                     cont = DBG_CONTINUE
@@ -352,7 +377,7 @@ def main():
 
         k32.ContinueDebugEvent(ev.dwProcessId, ev.dwThreadId, cont)
 
-    k32.TerminateProcess(hp, 0)
+    k32.TerminateProcess(P(hp), 0)
     if a.json:
         json.dump(dict(exe=a.exe, pid=pid, base=hex(base), size=hex(size), hits=hits),
                   open(a.json, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
