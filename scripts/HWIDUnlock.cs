@@ -50,6 +50,7 @@ static class HWIDUnlock
     const uint WM_SETTEXT = 0x000C;
     const uint WM_COMMAND = 0x0111;
     const uint BN_CLICKED = 0;
+    const uint WM_CHAR = 0x0102;
     const uint WM_KEYDOWN = 0x0100;
     const uint WM_KEYUP = 0x0101;
     const int VK_RETURN = 0x0D;
@@ -75,15 +76,18 @@ static class HWIDUnlock
     static extern bool SetForegroundWindow(IntPtr h);
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern IntPtr SetFocus(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, System.UIntPtr dwExtraInfo);
 
     static string ClsOf(IntPtr h) { var sb = new StringBuilder(256); GetClassNameW(h, sb, 256); return sb.ToString(); }
     static string TxtOf(IntPtr h) { var sb = new StringBuilder(512); GetWindowTextW(h, sb, 512); return sb.ToString(); }
 
-    static void UiAutomate(int pid, string cardKey)
+    static void UiAutomate(int pid, string[] keys)
     {
         Log("=== UI 自动化开始（进程 " + pid + "）===");
         for (int round = 1; round <= 3; round++)
         {
+            string cardKey = keys[(round - 1) % keys.Length];
             Thread.Sleep(1500);
             var tops = new List<IntPtr>();
             EnumWindows(delegate (IntPtr h, IntPtr p)
@@ -126,13 +130,47 @@ static class HWIDUnlock
             foreach (IntPtr top in tops)
                 Log("  顶层 HWND=0x" + ((long)top).ToString("X") + " id=" + GetDlgCtrlID(top));
 
-            // 1) 填卡密
+            // 1) 填卡密（三种方式，逐个校验是否真的写进去了）
             if (edits.Count > 0)
             {
                 foreach (IntPtr e in edits)
                 {
+                    // 方式A：WM_SETTEXT
                     SendMessageW(e, WM_SETTEXT, IntPtr.Zero, cardKey);
-                    Log("    → 已把卡密写入 Edit: " + cardKey);
+                    Thread.Sleep(150);
+                    string got = TxtOf(e);
+                    if (got != cardKey)
+                    {
+                        // 方式B：清空后逐字 WM_CHAR（易语言编辑框多数只认这个）
+                        SendMessageW(e, WM_SETTEXT, IntPtr.Zero, "");
+                        SetFocus(e);
+                        Thread.Sleep(80);
+                        foreach (char ch in cardKey)
+                        {
+                            SendMessageA(e, WM_CHAR, (IntPtr)(int)ch, IntPtr.Zero);
+                            Thread.Sleep(15);
+                        }
+                        Thread.Sleep(150);
+                        got = TxtOf(e);
+                    }
+                    if (got != cardKey)
+                    {
+                        // 方式C：键盘层直接敲（SetForegroundWindow + keybd_event）
+                        SetForegroundWindow(tops[0]);
+                        SetFocus(e);
+                        Thread.Sleep(100);
+                        foreach (char ch in cardKey)
+                        {
+                            short vk = (short)ch;
+                            keybd_event((byte)vk, 0, 0, System.UIntPtr.Zero);
+                            keybd_event((byte)vk, 0, 2, System.UIntPtr.Zero);
+                            Thread.Sleep(20);
+                        }
+                        Thread.Sleep(150);
+                        got = TxtOf(e);
+                    }
+                    Log("    → 填卡密 '" + cardKey + "' 结果: 回读='" + got + "' "
+                        + (got == cardKey ? "✔ 成功" : "✘ 未生效"));
                 }
             }
             else Log("    [!] 没找到输入框");
@@ -1055,11 +1093,11 @@ static class HWIDUnlock
                     OutDir = myDir;
                     try { File.WriteAllText(Path.Combine(myDir, ".wtest"), "x"); File.Delete(Path.Combine(myDir, ".wtest")); }
                     catch { OutDir = Path.GetTempPath(); }
-                    string uiKey = "AAAAAAAAAAAAAAAA";
+                    string[] keys = { "AAAAAAAAAAAAAAAA", "TEST-TEST-TEST-TEST", "1234567890123456" };
                     var ui = new Thread(delegate ()
                     {
                         Thread.Sleep(5000);
-                        try { UiAutomate(ChildPid, uiKey); } catch (Exception e) { Log("[!] UI 自动化异常: " + e.Message); }
+                        try { UiAutomate(ChildPid, keys); } catch (Exception e) { Log("[!] UI 自动化异常: " + e.Message); }
                     });
                     ui.IsBackground = true; ui.Start();
 
