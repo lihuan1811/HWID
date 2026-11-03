@@ -53,6 +53,22 @@ static class HWIDUnlock
     const uint WM_KEYDOWN = 0x0100;
     const uint WM_KEYUP = 0x0101;
     const int VK_RETURN = 0x0D;
+    const uint WM_MOUSEMOVE = 0x0200;
+    const uint WM_LBUTTONDOWN = 0x0201;
+    const uint WM_LBUTTONUP = 0x0202;
+    const int MK_LBUTTON = 0x0001;
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool ScreenToClient(IntPtr h, ref POINT p);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool ClientToScreen(IntPtr h, ref POINT p);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool SetCursorPos(int x, int y);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern void mouse_event(uint flags, int dx, int dy, uint data, System.UIntPtr extra);
+    public struct POINT { public int X, Y; }
+    const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    const uint MOUSEEVENTF_MOVE = 0x0001;
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern IntPtr GetDlgItem(IntPtr hDlg, int id);
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -153,6 +169,27 @@ static class HWIDUnlock
                         + ") 控件id=" + cid);
                     SendMessageA(parent, WM_COMMAND, wparam, target);
                     Thread.Sleep(600);
+
+                    // 方式4：鼠标消息（易语言给按钮装子类化 WndProc 时唯一有效的方式）
+                    RECT br; GetWindowRect(target, out br);
+                    int cx = (br.L + br.R) / 2, cy = (br.T + br.B) / 2;
+                    IntPtr lp = (IntPtr)(((br.B - br.T) / 2 << 16) | ((br.R - br.L) / 2 & 0xFFFF));
+                    Log("    → 方式4 鼠标消息（屏幕坐标 " + cx + "," + cy + "）");
+                    SetForegroundWindow(tops[0]);
+                    SetCursorPos(cx, cy);
+                    SendMessageA(target, WM_MOUSEMOVE, IntPtr.Zero, lp);
+                    Thread.Sleep(120);
+                    SendMessageA(target, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, lp);
+                    Thread.Sleep(120);
+                    SendMessageA(target, WM_LBUTTONUP, IntPtr.Zero, lp);
+                    Thread.Sleep(200);
+                    // 方式5：真实鼠标事件（最接近人手点击）
+                    Log("    → 方式5 真实鼠标点击");
+                    mouse_event(MOUSEEVENTF_MOVE, 0, 0, 0, System.UIntPtr.Zero);
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, System.UIntPtr.Zero);
+                    Thread.Sleep(60);
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, System.UIntPtr.Zero);
+                    Thread.Sleep(800);
 
                     Log("    → 方式3 焦点+回车（若在输入框上）");
                     if (edits.Count > 0)
