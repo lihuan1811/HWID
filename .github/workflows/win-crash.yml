@@ -27,27 +27,30 @@ jobs:
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile tools\procdump.zip
           Expand-Archive tools\procdump.zip -DestinationPath tools -Force
 
-      - name: 采集崩溃转储 + 首次异常日志
+      - name: 采集（快照 + WER 崩溃转储 + 首次异常）
         continue-on-error: true
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path out | Out-Null
-          # 首次异常（-e 1）：能看到壳自己"故意"抛的异常
-          Write-Host '===== procdump -e 1（first-chance exception 日志）====='
-          & tools\procdump64.exe -accepteula -e 1 -ma -t 'samples\HWIDMaster-0902.exe' 'out\firstchance.dmp' 2>&1 |
-            Tee-Object -FilePath out\firstchance.log
-          # 崩溃转储（-e，unhandled）
-          Write-Host '===== procdump -e（unhandled exception 崩溃转储）====='
-          & tools\procdump64.exe -accepteula -e -ma -t 'samples\HWIDMaster-0902.exe' 'out\crash.dmp' 2>&1 |
-            Tee-Object -FilePath out\crash_procdump.log
-          Get-ChildItem out -Filter *.dmp | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB) }
+          # 主采集：Start-Process + procdump -ma <pid> 快照 + WER LocalDumps 崩溃转储（已验证可用）
+          ./scripts/win_probe2.ps1 -Exe 'samples\HWIDMaster-0902.exe' -Procdump 'tools\procdump64.exe' `
+            -OutDir 'probe3' -EpList @() -LiveSnapshotSeconds 2 -MaxLiveSnapshots 2
+          Write-Host '--- 采集到的 dump ---'
+          Get-ChildItem probe3\dumps -Filter *.dmp | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB) }
+          # 首次异常（-x = 启动镜像并监控；-e 1 = first chance）
+          Write-Host '===== procdump -x -e 1（first-chance）====='
+          & tools\procdump64.exe -accepteula -x -e 1 -ma 'samples\HWIDMaster-0902.exe' 'probe3\dumps\firstchance.dmp' 2>&1 |
+            Tee-Object -FilePath probe3\firstchance.log
+          Get-ChildItem probe3 -Filter *.dmp -ErrorAction SilentlyContinue | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB) }
 
       - name: 崩点定位（线程 PC + 栈回溯）
         shell: pwsh
         run: |
-          $dmp = Get-ChildItem out -Filter *.dmp | Sort-Object Length -Descending | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          # 崩溃转储 = WER 生成的 HWIDMaster-0902.exe.<pid>.dmp；没有就退而取最大的
+          $dmp = Get-ChildItem probe3\dumps -Filter 'HWIDMaster-0902.exe.*.dmp' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dmp) { $dmp = Get-ChildItem probe3\dumps -Filter *.dmp | Sort-Object Length -Descending | Select-Object -First 1 }
           if (-not $dmp) { throw '没有拿到 dump' }
-          Write-Host "分析: $($dmp.Name)"
+          Write-Host "崩溃转储: $($dmp.Name)  $([math]::Round($dmp.Length/1MB,1)) MB"
           python tools/dmp2img.py --dmp "$($dmp.FullName)" --base 0x400000 --size 0x54b1000 `
                  --module HWIDMaster --out out\mem.bin --json out/dmp.json
           Write-Host '===== 解密覆盖率（逐段比对磁盘原文）====='
@@ -57,7 +60,7 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          $dmp = Get-ChildItem out -Filter *.dmp | Sort-Object Length -Descending | Select-Object -First 1
+          $dmp = Get-ChildItem probe3\dumps -Filter *.dmp | Sort-Object Length -Descending | Select-Object -First 1
           python tools/kw_context.py "$($dmp.FullName)" --base 0x400000 | Tee-Object -FilePath out\kw.txt
           Write-Host '--- 镜像里也扫一遍 ---'
           python tools/kw_context.py out\mem.bin --base 0x400000 | Tee-Object -FilePath out\kw_mem.txt
@@ -78,5 +81,6 @@ jobs:
           path: |
             out/*.json
             out/*.txt
-            out/*.log
+            probe3/firstchance.log
+            probe3/run.log
           if-no-files-found: warn
