@@ -48,6 +48,17 @@ static class HWIDUnlock
 
     const uint BM_CLICK = 0x00F5;
     const uint WM_SETTEXT = 0x000C;
+    const uint WM_COMMAND = 0x0111;
+    const uint BN_CLICKED = 0;
+    const uint WM_KEYDOWN = 0x0100;
+    const uint WM_KEYUP = 0x0101;
+    const int VK_RETURN = 0x0D;
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr GetDlgItem(IntPtr hDlg, int id);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool SetForegroundWindow(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr SetFocus(IntPtr h);
 
     static string ClsOf(IntPtr h) { var sb = new StringBuilder(256); GetClassNameW(h, sb, 256); return sb.ToString(); }
     static string TxtOf(IntPtr h) { var sb = new StringBuilder(512); GetWindowTextW(h, sb, 512); return sb.ToString(); }
@@ -131,9 +142,27 @@ static class HWIDUnlock
                 }
                 if (target != IntPtr.Zero)
                 {
-                    Log("    → 发送 BM_CLICK 到 '" + TxtOf(target) + "'");
+                    IntPtr parent = GetParent(target);
+                    int cid = GetDlgCtrlID(target);
+                    Log("    → 方式1 BM_CLICK 到 '" + TxtOf(target) + "'");
                     SendMessageA(target, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
-                    Thread.Sleep(1200);
+                    Thread.Sleep(600);
+
+                    IntPtr wparam = (IntPtr)((BN_CLICKED << 16) | ((uint)(cid & 0xFFFF)));
+                    Log("    → 方式2 WM_COMMAND 到父窗口(0x" + ((long)parent).ToString("X")
+                        + ") 控件id=" + cid);
+                    SendMessageA(parent, WM_COMMAND, wparam, target);
+                    Thread.Sleep(600);
+
+                    Log("    → 方式3 焦点+回车（若在输入框上）");
+                    if (edits.Count > 0)
+                    {
+                        SetForegroundWindow(tops[0]);
+                        SetFocus(edits[0]);
+                        SendMessageA(edits[0], WM_KEYDOWN, (IntPtr)VK_RETURN, IntPtr.Zero);
+                        SendMessageA(edits[0], WM_KEYUP, (IntPtr)VK_RETURN, IntPtr.Zero);
+                        Thread.Sleep(600);
+                    }
                 }
             }
             else Log("    [!] 没找到按钮");
@@ -434,6 +463,11 @@ static class HWIDUnlock
             else if (a == "--keep-alias") KeepAlias = true;
             else if (a == "--exit-after" && i + 1 < argv.Length) int.TryParse(argv[++i], out ExitAfter);
             else if (a == "--extract-only") Launch = false;
+            else if (a == "--proxy")
+            {
+                ProxyMode = true;
+                ProxyTarget = (i + 1 < argv.Length && !argv[i + 1].StartsWith("--")) ? argv[++i] : "111.229.48.214";
+            }
         }
         if (Ports.Count == 0)
         {
@@ -513,6 +547,66 @@ static class HWIDUnlock
         f[3] = (byte)((L >> 16) & 0xFF); f[4] = (byte)((L >> 24) & 0xFF);
         Buffer.BlockCopy(payload, 0, f, 5, payload.Length);
         return f;
+    }
+
+    static bool ProxyMode = false;
+    static string ProxyTarget = "";
+
+    static void ProxyLoop(int port)
+    {
+        TcpListener l = null;
+        try { l = new TcpListener(IPAddress.Any, port); l.Start(16); }
+        catch (Exception e) { Log("代理端口 " + port + " 失败: " + e.Message); return; }
+        Log("[代理] 监听 0.0.0.0:" + port + " → 转发到 " + ProxyTarget + ":" + port);
+        while (true)
+        {
+            TcpClient c;
+            try { c = l.AcceptTcpClient(); } catch { Thread.Sleep(100); continue; }
+            int p = port;
+            ThreadPool.QueueUserWorkItem(delegate (object o)
+            {
+                TcpClient cli = (TcpClient)o;
+                string tag = "[" + p + "] ";
+                try
+                {
+                    // 关键：临时摘掉 IP 劫持，才能路由到真服务器
+                    string ifName = FindLoopback();
+                    RunNetsh(string.Format("interface ipv4 delete address name=\"{0}\" address={1}", ifName, ServerIp));
+                    TcpClient srv = new TcpClient();
+                    srv.Connect(ProxyTarget, p);
+                    Log(tag + "已连上真服务器 " + ProxyTarget + ":" + p);
+                    RunNetsh(string.Format("interface ipv4 add address name=\"{0}\" address={1} mask=255.255.255.255", ifName, ServerIp));
+
+                    NetworkStream cs = cli.GetStream(), ss = srv.GetStream();
+                    cs.ReadTimeout = 8000; ss.ReadTimeout = 8000;
+                    var t1 = new Thread(delegate ()
+                    {
+                        byte[] b = new byte[8192];
+                        while (true)
+                        {
+                            int n; try { n = cs.Read(b, 0, b.Length); } catch { break; }
+                            if (n <= 0) break;
+                            byte[] seg = new byte[n]; Buffer.BlockCopy(b, 0, seg, 0, n);
+                            Log(tag + "上行 " + n + " 字节: " + Hex(seg, 128));
+                            try { ss.Write(seg, 0, n); ss.Flush(); } catch { break; }
+                        }
+                        try { ss.Close(); } catch { }
+                    });
+                    t1.IsBackground = true; t1.Start();
+                    byte[] rb = new byte[8192];
+                    while (true)
+                    {
+                        int n; try { n = ss.Read(rb, 0, rb.Length); } catch { break; }
+                        if (n <= 0) break;
+                        byte[] seg = new byte[n]; Buffer.BlockCopy(rb, 0, seg, 0, n);
+                        Log(tag + "下行 " + n + " 字节: " + Hex(seg, 128));
+                        try { cs.Write(seg, 0, n); cs.Flush(); } catch { break; }
+                    }
+                    try { cli.Close(); srv.Close(); } catch { }
+                }
+                catch (Exception e) { Log(tag + "代理异常: " + e.Message); }
+            }, c);
+        }
     }
 
     static string ReplyFor(string mode)
@@ -851,6 +945,17 @@ static class HWIDUnlock
         if (reply.Length > 0) Log("回包内容: " + reply);
         else Log("log 模式：只抓包不回包");
 
+        if (ProxyMode)
+        {
+            Log("[代理模式] 目标真服务器: " + ProxyTarget);
+            foreach (int p in Ports)
+            {
+                int cp = p;
+                var tp = new Thread(delegate () { ProxyLoop(cp); });
+                tp.IsBackground = true; tp.Start();
+            }
+        }
+        else
         foreach (int p in Ports)
         {
             int cp = p;
