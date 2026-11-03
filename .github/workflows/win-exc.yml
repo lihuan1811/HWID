@@ -1,0 +1,61 @@
+# 拿"崩溃那条指令"：先起进程 → 按 PID 挂 procdump -e -ma -t → 异常时转储并打印地址
+name: win-exc
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/win-exc.yml'
+
+jobs:
+  exc:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 依赖
+        shell: pwsh
+        run: |
+          python -m pip install --quiet capstone
+          New-Item -ItemType Directory -Force -Path tools,out | Out-Null
+          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile tools\procdump.zip
+          Expand-Archive tools\procdump.zip -DestinationPath tools -Force
+
+      - name: 附加等异常
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath 'samples\HWIDMaster-0902.exe' -PassThru
+          Write-Host "pid=$($p.Id)"
+          Start-Sleep -Milliseconds 300
+          # -e 未处理异常 / -ma 全内存 / -t 转储后终止
+          & tools\procdump64.exe -accepteula -e -ma -t $p.Id out\exc.dmp 2>&1 |
+            Tee-Object -FilePath out\procdump_exc.txt
+          Get-ChildItem out -Filter *.dmp | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB) }
+
+      - name: 解析异常与崩溃点
+        shell: pwsh
+        run: |
+          if (-not (Test-Path out\exc.dmp)) { Write-Host '没有 exc.dmp'; exit 0 }
+          python tools/dmp2img.py --dmp out\exc.dmp --base 0x400000 --size 0x54b1000 `
+                 --module HWIDMaster --out out\exc_mem.bin --json out\exc_dmp.json
+          Write-Host '--- 解密覆盖率 ---'
+          python tools/decrypt_coverage.py --img out\exc_mem.bin --orig samples\HWIDMaster-0902.exe --json out\exc_cov.json
+          Write-Host '--- 重建+找串引用 ---'
+          python tools/dump2exe.py --dump out\exc_mem.bin --base 0x400000 --out out\exc_unpacked.exe --drop-shell --report
+          python tools/pe_triage.py out\exc_unpacked.exe --json out\exc_triage.json | Select-String '熵|判定'
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exc
+          path: |
+            out/*.json
+            out/*.txt
+            out/exc_unpacked.exe
+          if-no-files-found: warn
