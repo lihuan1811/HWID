@@ -1,0 +1,71 @@
+{
+  "exe": "/Users/tt-ai-designer/Documents/deepseek-harness/default-workspace/HWIDMaster-0902_re/tests/fixture_license.exe",
+  "strings": [
+    {
+      "text": "激活码无效",
+      "rva": "0x2000",
+      "kind": "gbk",
+      "score": 85,
+      "hits": [
+        "激活码",
+        "激活",
+        "无效"
+      ],
+      "xrefs": [
+        "0x100b"
+      ],
+      "gates": [
+        {
+          "gate_rva": 4119,
+          "section": ".text",
+          "jcc": "je 0x40101e",
+          "bytes": "7405",
+          "prev": "call 0x401030 ; test al, al",
+          "near_cmp": true,
+          "dist": 12,
+          "score": 44,
+          "via": "push imm32",
+          "xref": "0x100b"
+        }
+      ]
+    },
+    {
+      "text": "请先激活后再使用",
+      "rva": "0x2040",
+      "kind": "gbk",
+      "score": 70,
+      "hits": [
+        "激活",
+        "请先激活"
+      ],
+      "xrefs": [],
+      "gates": []
+    },
+    {
+      "text": "机器码",
+      "rva": "0x2020",
+      "kind": "gbk",
+      "score": 35,
+      "hits": [
+        "机器码"
+      ],
+      "xrefs": [
+        "0x1033"
+      ],
+      "gates": [
+        {
+          "gate_rva": 4119,
+          "section": ".text",
+          "jcc": "je 0x40101e",
+          "bytes": "7405",
+          "prev": "call 0x401030 ; test al, al",
+          "near_cmp": true,
+          "dist": 28,
+          "score": 42,
+          "via": "push imm32",
+          "xref": "0x1033"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,472 @@
+{
+  "file": "/Users/tt-ai-designer/Documents/deepseek-harness/default-workspace/HWIDMaster-0902_re/samples/HWIDMaster-0902.exe",
+  "size": 45244416,
+  "md5": "6e52de4aeb2a760d5453e354e18bac41",
+  "machine": "0x14c",
+  "bits": 32,
+  "subsystem": 2,
+  "imagebase": "0x400000",
+  "entry_point": "0x2af1dd3",
+  "sizeofimage": "0x54b1000",
+  "overlay_off": "0x2b26000",
+  "overlay_size": 0,
+  "sections": [
+    {
+      "name": ".text",
+      "va": "0x1000",
+      "vs": "0x119442",
+      "raw_off": "0x0",
+      "raw_size": "0x0",
+      "flags": "0x60000020",
+      "ent_file": null,
+      "data_in_file": false
+    },
+    {
+      "name": ".rdata",
+      "va": "0x11b000",
+      "vs": "0x1e5fab2",
+      "raw_off": "0x0",
+      "raw_size": "0x0",
+      "flags": "0x40000040",
+      "ent_file": null,
+      "data_in_file": false
+    },
+    {
+      "name": ".data",
+      "va": "0x1f7b000",
+      "vs": "0x8aa8a",
+      "raw_off": "0x0",
+      "raw_size": "0x0",
+      "flags": "0xc0000040",
+      "ent_file": null,
+      "data_in_file": false
+    },
+    {
+      "name": ".z{+",
+      "va": "0x2006000",
+      "vs": "0x97f900",
+      "raw_off": "0x0",
+      "raw_size": "0x0",
+      "flags": "0x60000020",
+      "ent_file": null,
+      "data_in_file": false
+    },
+    {
+      "name": ".K0[",
+      "va": "0x2986000",
+      "vs": "0x7cc",
+      "raw_off": "0x1000",
+      "raw_size": "0x1000",
+      "flags": "0xc0000040",
+      "ent_file": 4.101,
+      "data_in_file": true
+    },
+    {
+      "name": ".KPx",
+      "va": "0x2987000",
+      "vs": "0x2b014f0",
+      "raw_off": "0x2000",
+      "raw_size": "0x2b02000",
+      "flags": "0x60000020",
+      "ent_file": 7.989,
+      "data_in_file": true
+    },
+    {
+      "name": ".rsrc",
+      "va": "0x5489000",
+      "vs": "0x27bce",
+      "raw_off": "0x2b04000",
+      "raw_size": "0x22000",
+      "flags": "0x40000040",
+      "ent_file": 3.376,
+      "data_in_file": true
+    }
+  ],
+  "sections_without_file_data": [
+    ".text",
+    ".rdata",
+    ".data",
+    ".z{+"
+  ],
+  "entropy_mb": [
+    [
+      0.0,
+      7.779
+    ],
+    [
+      1.0,
+      7.986
+    ],
+    [
+      2.0,
+      8.0
+    ],
+    [
+      3.0,
+      8.0
+    ],
+    [
+      4.0,
+      8.0
+    ],
+    [
+      5.0,
+      8.0
+    ],
+    [
+      6.0,
+      8.0
+    ],
+    [
+      7.0,
+      8.0
+    ],
+    [
+      8.0,
+      8.0
+    ],
+    [
+      9.0,
+      8.0
+    ],
+    [
+      10.0,
+      8.0
+    ],
+    [
+      11.0,
+      8.0
+    ],
+    [
+      12.0,
+      8.0
+    ],
+    [
+      13.0,
+      8.0
+    ],
+    [
+      14.0,
+      8.0
+    ],
+    [
+      15.0,
+      8.0
+    ],
+    [
+      16.0,
+      8.0
+    ],
+    [
+      17.0,
+      8.0
+    ],
+    [
+      18.0,
+      8.0
+    ],
+    [
+      19.0,
+      8.0
+    ],
+    [
+      20.0,
+      8.0
+    ],
+    [
+      21.0,
+      8.0
+    ],
+    [
+      22.0,
+      8.0
+    ],
+    [
+      23.0,
+      8.0
+    ],
+    [
+      24.0,
+      8.0
+    ],
+    [
+      25.0,
+      8.0
+    ],
+    [
+      26.0,
+      8.0
+    ],
+    [
+      27.0,
+      8.0
+    ],
+    [
+      28.0,
+      8.0
+    ],
+    [
+      29.0,
+      7.99
+    ],
+    [
+      30.0,
+      7.8
+    ],
+    [
+      31.0,
+      8.0
+    ],
+    [
+      32.0,
+      8.0
+    ],
+    [
+      33.0,
+      8.0
+    ],
+    [
+      34.0,
+      8.0
+    ],
+    [
+      35.0,
+      8.0
+    ],
+    [
+      36.0,
+      8.0
+    ],
+    [
+      37.0,
+      8.0
+    ],
+    [
+      38.0,
+      8.0
+    ],
+    [
+      39.0,
+      7.864
+    ],
+    [
+      40.0,
+      7.374
+    ],
+    [
+      41.0,
+      7.259
+    ],
+    [
+      42.0,
+      7.592
+    ],
+    [
+      43.0,
+      3.718
+    ]
+  ],
+  "fraction_blocks_entropy_gt_7.9": 0.841,
+  "mean_entropy": 7.849,
+  "ep_section": ".KPx",
+  "ep_file_offset": "0x16cdd3",
+  "ep_window_entropy": 7.641,
+  "ep_decoded_insns": 10,
+  "ep_decoded_bytes": 25,
+  "ep_disasm_head": [
+    "0x2ef1dd3: call 0x553ceb9",
+    "0x2ef1dd8: pop esi",
+    "0x2ef1dd9: push esi",
+    "0x2ef1dda: sbb esp, dword ptr [eax + 0x550c9670]",
+    "0x2ef1de0: jae 0x2ef1d7a",
+    "0x2ef1de2: cli ",
+    "0x2ef1de3: push es",
+    "0x2ef1de4: adc eax, 0xd873b2db",
+    "0x2ef1de9: mov dl, 0xb6",
+    "0x2ef1deb: std "
+  ],
+  "ep_decoded_ratio": 0.0061,
+  "top_code_windows": [
+    {
+      "off": "0x2a23000",
+      "ratio": 1.0,
+      "insns": 1067
+    },
+    {
+      "off": "0x2a1d000",
+      "ratio": 1.0,
+      "insns": 1084
+    },
+    {
+      "off": "0x2a19000",
+      "ratio": 1.0,
+      "insns": 1116
+    },
+    {
+      "off": "0x2a10000",
+      "ratio": 1.0,
+      "insns": 1108
+    },
+    {
+      "off": "0x2a0f000",
+      "ratio": 1.0,
+      "insns": 1051
+    },
+    {
+      "off": "0x2a0d000",
+      "ratio": 1.0,
+      "insns": 1075
+    },
+    {
+      "off": "0x2a0b000",
+      "ratio": 1.0,
+      "insns": 1080
+    },
+    {
+      "off": "0x2a0a000",
+      "ratio": 1.0,
+      "insns": 1057
+    }
+  ],
+  "has_plaintext_stub": true,
+  "best_code_window_ratio": 1.0,
+  "vm_handler_windows": 382,
+  "vm_handler_range": [
+    "0x7e000",
+    "0x2af0000"
+  ],
+  "vm_handler_ratio_avg": 0.42,
+  "vm_handler_sample": [
+    {
+      "off": "0x7e000",
+      "ratio": 0.36,
+      "insns": 1208
+    },
+    {
+      "off": "0x95000",
+      "ratio": 0.39,
+      "insns": 1158
+    },
+    {
+      "off": "0x1e89000",
+      "ratio": 0.37,
+      "insns": 1175
+    },
+    {
+      "off": "0x1eb7000",
+      "ratio": 0.38,
+      "insns": 1221
+    },
+    {
+      "off": "0x282e000",
+      "ratio": 0.41,
+      "insns": 1072
+    },
+    {
+      "off": "0x282f000",
+      "ratio": 0.4,
+      "insns": 1063
+    }
+  ],
+  "decompressible_streams": [],
+  "imports": [
+    {
+      "dll": "MSVFW32.dll",
+      "count": 1
+    },
+    {
+      "dll": "AVIFIL32.dll",
+      "count": 2
+    },
+    {
+      "dll": "KERNEL32.dll",
+      "count": 149
+    },
+    {
+      "dll": "USER32.dll",
+      "count": 168
+    },
+    {
+      "dll": "GDI32.dll",
+      "count": 92
+    },
+    {
+      "dll": "WINMM.dll",
+      "count": 19
+    },
+    {
+      "dll": "MSIMG32.dll",
+      "count": 1
+    },
+    {
+      "dll": "WINSPOOL.DRV",
+      "count": 3
+    },
+    {
+      "dll": "comdlg32.dll",
+      "count": 4
+    },
+    {
+      "dll": "ADVAPI32.dll",
+      "count": 5
+    },
+    {
+      "dll": "SHELL32.dll",
+      "count": 3
+    },
+    {
+      "dll": "ole32.dll",
+      "count": 3
+    },
+    {
+      "dll": "OLEAUT32.dll",
+      "count": 3
+    },
+    {
+      "dll": "COMCTL32.dll",
+      "count": 13
+    },
+    {
+      "dll": "WS2_32.dll",
+      "count": 12
+    }
+  ],
+  "import_dirs": {
+    "Import": [
+      "0x5138e14",
+      "0x140"
+    ],
+    "Resource": [
+      "0x5489000",
+      "0x27bce"
+    ],
+    "IAT": [
+      "0x2986000",
+      "0x7b4"
+    ]
+  },
+  "fingerprint_notes": [
+    "命中壳特征串 UPX: b'UPX1'",
+    "导入表特征：VCL(AVI/Video)（avifil32.dll）",
+    "导入表特征：VCL(GradientFill)（msimg32.dll）",
+    "导入表特征：VCL(打印)（winspool.drv）",
+    "导入表特征：VCL 控件（comctl32.dll）",
+    "导入表特征：VCL OLE（oleaut32.dll）",
+    "段名被随机化/非标准：'.z{+', '.K0['"
+  ],
+  "verdict_codes": [
+    "C_RAW_EMPTY",
+    "EP_NOT_CODE",
+    "BODY_ENCRYPTED",
+    "NOT_JUST_COMPRESSED",
+    "VM_STUB_PRESENT"
+  ],
+  "verdict_reasons": [
+    "这些段在文件里没有任何字节（SizeOfRawData=0），只能在内存里被壳填出来：['.text', '.rdata', '.data', '.z{+']",
+    "入口点连续可解码字节只占 0.61%，即 EP 处不是机器码（CPU 跳过去只会执行到垃圾字节）",
+    "84% 的 1MB 块熵 > 7.9，主体数据是加密的",
+    "全文件采样未找到任何可解开的 zlib/lzma 流 → 不是\"压缩壳\"，是真加密",
+    "382 个 4KB 窗口是\"虚拟机 handler 代码\"形态（100% 可解码、not/neg/rol/ror/bts/btc/xor 占比均值 42%），地址区间 0x7e000~0x2af0000 → 这是 VMProtect 这一类**虚拟机壳**的 stub，壳确实存在"
+  ],
+  "conclusion": "VM_PACKED_EP_MISMATCH: 壳是**虚拟机型（VMProtect 类）**，它的 VM stub 就明文躺在文件尾部的 .KPx 里；但 PE 头里的入口点(EP)指向另一片密文区 —— 也就是说\"入口点\"被二次改写/剥离过，CPU 不会跳到 VM stub 上，本文件双击无法启动。要脱壳必须在 Windows 上让它在真实入口开始跑，或者拿到配套的 loader/启动器，或者用运行时内存转储。"
+}

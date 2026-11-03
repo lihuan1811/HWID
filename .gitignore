@@ -1,0 +1,6 @@
+# 体积大的中间产物 / 转储，不进仓库
+out/
+*.dmp
+*.bak
+*.patchlog.json
+__pycache__/

@@ -1,0 +1,60 @@
+# 在 GitHub 免费的 Windows runner 上做的事：
+#   1) 原样本跑一次 → 记录是否起窗口/退出码/崩溃模块与地址
+#   2) 依次把入口点(EP)改成壳 stub 区的候选值 → 再跑一次，看能不能起界面
+#   3) 只要有进程活着（=壳跑起来了），立刻 procdump 全内存转储并上传
+# 产出：dumps/*.dmp + probe/report.*  下载回来丢给 tools/dump2exe.py 继续
+name: win-probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/win_probe.ps1'
+      - 'samples/**'
+      - '.github/workflows/win-probe.yml'
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境自检
+        shell: pwsh
+        run: |
+          $PSVersionTable | Out-String
+          Get-CimInstance Win32_OperatingSystem |
+            Select-Object Caption, Version, OSArchitecture | Format-List
+          # 32 位子系统必须在（PE32 程序要靠它）
+          if (Test-Path "$env:SystemRoot\SysWOW64\ntdll.dll") { 'SysWOW64: OK' } else { 'SysWOW64: MISSING' }
+
+      - name: 取 procdump
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile tools\procdump.zip
+          Expand-Archive tools\procdump.zip -DestinationPath tools -Force
+          Get-ChildItem tools | Format-Table Name, Length
+
+      - name: 跑探测（EP 矩阵 + dump）
+        shell: pwsh
+        run: |
+          ./scripts/win_probe.ps1 -Exe 'samples\HWIDMaster-0902.exe' -Procdump 'tools\procdump64.exe' -OutDir 'probe'
+
+      - name: 回传报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-report
+          path: probe/**
+          if-no-files-found: warn
+
+      - name: 回传内存转储（有才传）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dumps
+          path: probe/dumps/**
+          if-no-files-found: ignore
+          compression-level: 1
