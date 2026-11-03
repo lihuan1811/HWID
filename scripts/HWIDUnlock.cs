@@ -253,6 +253,69 @@ static class HWIDUnlock
         }
     }
 
+    // 每次连接换一种应答格式，让客户端"自己帮我们测"哪一种是它要的
+    static int StrategyIdx = -1;
+    static readonly object StrategyLock = new object();
+
+    static byte[] NextReply(byte[] req, int port)
+    {
+        int idx;
+        lock (StrategyLock) { StrategyIdx++; idx = StrategyIdx; }
+        string name;
+        byte[] body;
+        if (req != null && req.Length >= 5)
+        {
+            byte[] payload = new byte[req.Length - 5];
+            Buffer.BlockCopy(req, 5, payload, 0, payload.Length);
+            int len = req.Length;
+            switch (idx % 6)
+            {
+                case 0:   // 类型改 0x02 + 回显原密文（最常见的"应答=同构帧"）
+                    name = "S1 帧[02]+回显密文";
+                    body = Frame(0x02, payload);
+                    break;
+                case 1:   // 类型 0x02 + 全零
+                    name = "S2 帧[02]+零填充";
+                    body = Frame(0x02, new byte[payload.Length]);
+                    break;
+                case 2:   // 类型 0x02 + 明文成功串
+                    name = "S3 帧[02]+明文Right";
+                    body = Frame(0x02, GBK.GetBytes("Right,初始化成功!"));
+                    break;
+                case 3:   // 类型 0x01 + 回显（原类型回显）
+                    name = "S4 帧[01]+回显密文";
+                    body = Frame(0x01, payload);
+                    break;
+                case 4:   // 原包整包回显
+                    name = "S5 整包回显";
+                    body = req;
+                    break;
+                default:  // 纯明文成功串
+                    name = "S6 纯明文Right";
+                    body = GBK.GetBytes("Right,初始化成功!");
+                    break;
+            }
+        }
+        else
+        {
+            name = "S0 纯明文Right";
+            body = GBK.GetBytes("Right,初始化成功!");
+        }
+        Log("  使用应答策略: " + name + "  (" + body.Length + " 字节)");
+        return body;
+    }
+
+    static byte[] Frame(byte type, byte[] payload)
+    {
+        byte[] f = new byte[5 + payload.Length];
+        f[0] = type;
+        int L = f.Length;
+        f[1] = (byte)(L & 0xFF); f[2] = (byte)((L >> 8) & 0xFF);
+        f[3] = (byte)((L >> 16) & 0xFF); f[4] = (byte)((L >> 24) & 0xFF);
+        Buffer.BlockCopy(payload, 0, f, 5, payload.Length);
+        return f;
+    }
+
     static string ReplyFor(string mode)
     {
         switch (mode)
@@ -331,22 +394,21 @@ static class HWIDUnlock
 
             if (reply.Length > 0)
             {
-                byte[] body = GBK.GetBytes(reply);
-                byte[] outb;
+                byte[] outb = NextReply(data, port);
                 if (http)
                 {
-                    string h = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=gbk\r\nContent-Length: " + body.Length + "\r\nConnection: close\r\n\r\n";
+                    string h = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + outb.Length + "\r\nConnection: close\r\n\r\n";
                     byte[] hb = Encoding.ASCII.GetBytes(h);
-                    outb = new byte[hb.Length + body.Length];
-                    Buffer.BlockCopy(hb, 0, outb, 0, hb.Length);
-                    Buffer.BlockCopy(body, 0, outb, hb.Length, body.Length);
+                    byte[] tmp = new byte[hb.Length + outb.Length];
+                    Buffer.BlockCopy(hb, 0, tmp, 0, hb.Length);
+                    Buffer.BlockCopy(outb, 0, tmp, hb.Length, outb.Length);
+                    outb = tmp;
                 }
-                else outb = body;
                 try
                 {
                     st.Write(outb, 0, outb.Length);
                     st.Flush();
-                    Log("  → 已回包(" + (http ? "HTTP" : "RAW") + "): " + reply);
+                    Log("  → 已发送应答 " + outb.Length + " 字节: " + Hex(outb, 64));
                 }
                 catch (Exception e) { Log("  → 回包失败: " + e.Message); }
             }
