@@ -201,9 +201,18 @@ static class HWIDUnlock
         }
         if (Ports.Count == 0)
         {
-            // 常见网络验证端口 + 常见 Web 端口
-            int[] def = new int[] { 80, 443, 8080, 8888, 9000, 9090, 9999, 5211, 27112, 3389, 10086, 12345 };
+            // 常见网络验证/Web 端口
+            int[] def = new int[] { 80, 443, 8080, 8888, 9000, 9090, 9999, 5211, 27112, 3389, 10086, 12345, 3000, 4000, 5000, 6060, 7000, 7001, 8001, 8443 };
             Ports.AddRange(def);
+            // 再扫一批常用自定义端口段（覆盖"随机但固定"的服务端端口）
+            int[][] ranges = new int[][] {
+                new int[] { 8000, 8100 }, new int[] { 8800, 8900 },
+                new int[] { 9000, 9100 }, new int[] { 10000, 10100 },
+                new int[] { 27000, 27120 }, new int[] { 5000, 5300 }
+            };
+            foreach (int[] rg in ranges)
+                for (int p = rg[0]; p <= rg[1]; p++)
+                    if (!Ports.Contains(p)) Ports.Add(p);
         }
     }
 
@@ -268,6 +277,12 @@ static class HWIDUnlock
                 Log("  HEX  : " + Hex(data, 512));
                 Log("  ASCII: " + Ascii(data, 512));
                 try { Log("  GBK  : " + GBK.GetString(data)); } catch { }
+            }
+
+            if (data.Length > 0 && data[0] == 0x16)
+            {
+                Log("  !!! 这是 TLS(HTTPS) 握手包 —— 明文回包不可能被接受");
+                Log("      说明它走的是加密通道，需要改成客户端补丁方案（把判定改掉，而不是冒充服务器）");
             }
 
             bool http = false;
@@ -481,6 +496,14 @@ static class HWIDUnlock
                         var u = new Thread(delegate () { UdpLoop(cp, Reply); });
                         u.IsBackground = true; u.Start();
                     }
+                }
+                if (tick % 25 == 0)
+                {
+                    int nb, se;
+                    lock (BoundTcp) nb = BoundTcp.Count;
+                    lock (SeenEndpoints) se = SeenEndpoints.Count;
+                    Log("[心跳] 已监听 TCP 端口 " + nb + " 个；已捕获目标外连 " + se + " 条；劫持="
+                        + (AliasOk ? "成功" : "失败"));
                 }
                 if (tick % 75 == 0 && !AliasOk)
                     Log("[i] 仍在等待；当前未检测到任何到 " + ServerIp + " 的连接"
