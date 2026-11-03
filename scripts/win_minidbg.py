@@ -308,20 +308,48 @@ def main():
                 print(f'[dbg] 这些断点的 DLL 还没在列表里: {miss}')
         return n
 
+    def find_export_anywhere(fn, dll_hint=''):
+        """在目标进程的所有已加载模块里找导出函数（不依赖模块名）"""
+        mods = (wt.HMODULE * 2048)()
+        cb = wt.DWORD(0)
+        if not k32.K32EnumProcessModulesEx(P(hp), ctypes.byref(mods), ctypes.sizeof(mods),
+                                           ctypes.byref(cb), 1) and not \
+           k32.K32EnumProcessModulesEx(P(hp), ctypes.byref(mods), ctypes.sizeof(mods),
+                                       ctypes.byref(cb), 3):
+            return 0
+        n = cb.value // ctypes.sizeof(wt.HMODULE)
+        order = list(range(n))
+        if dll_hint:
+            # 名字里带提示的优先（虽然名字解析不稳，但拿到就用）
+            for i in order:
+                b = ctypes.cast(mods[i], P).value or 0
+                if b and dll_bases.get('', 0) == b:
+                    pass
+        for i in order:
+            b = ctypes.cast(mods[i], P).value or 0
+            if not b:
+                continue
+            a = resolve_export(hp, b, fn)
+            if a:
+                return a
+        return 0
+
     def try_arm():
         for spec in list(a.bp):
             if spec in wanted:
                 addr = wanted[spec]
             else:
                 dll, fn = spec.split('!')
-                b0 = dll_bases.get(dll.lower())
-                if not b0:
-                    continue
-                addr = resolve_export(hp, b0, fn)
+                b0 = dll_bases.get(dll.lower()) or 0
+                addr = resolve_export(hp, b0, fn) if b0 else 0
+                if not addr:
+                    addr = find_export_anywhere(fn)
+                    if addr:
+                        print(f'[+] {spec} 通过全模块搜索解析到 {addr:#x}')
                 if not addr:
                     if spec not in getattr(try_arm, '_warned', set()):
                         try_arm._warned = getattr(try_arm, '_warned', set()) | {spec}
-                        print(f'[!] 解析导出失败: {spec} (模块 {dll} 基址 {b0:#x})')
+                        print(f'[!] 解析导出失败: {spec}')
                     continue
                 wanted[spec] = addr
                 print(f'[+] 解析到 {spec} = {addr:#x} (模块基址 {b0:#x})')
