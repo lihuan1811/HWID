@@ -1,0 +1,55 @@
+# 第一轮：摸清它连服务器用的端口与发包行为（不改客户端，纯观察）
+name: win-net
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/win-net.yml'
+
+jobs: 
+  recon:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 观察连接（端口/状态/流量）
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          $p = Start-Process -FilePath 'samples\HWIDMaster-0902.exe' -PassThru
+          $pid2 = $p.Id
+          Write-Host "pid=$pid2  开始采样 12 秒（每 150ms）"
+          $seen = @{}
+          $t0 = Get-Date
+          while (((Get-Date) - $t0).TotalSeconds -lt 12) {
+            try {
+              $conns = Get-NetTCPConnection -OwningProcess $pid2 -ErrorAction SilentlyContinue
+              foreach ($c in $conns) {
+                $key = "$($c.LocalAddress):$($c.LocalPort) -> $($c.RemoteAddress):$($c.RemotePort) [$($c.State)]"
+                if (-not $seen.ContainsKey($key)) {
+                  $seen[$key] = (Get-Date).ToString('HH:mm:ss.fff')
+                  Write-Host "  [$($seen[$key])] $key"
+                }
+              }
+            } catch {}
+            Start-Sleep -Milliseconds 150
+          }
+          Write-Host '--- netstat -ano（全量，含 SYN_SENT）---'
+          netstat -ano | Select-String "TCP" | Select-Object -First 40 | Tee-Object -FilePath out/netstat.txt
+          Write-Host '--- 该进程的所有 UDP/TCP 端点 ---'
+          Get-NetUDPEndpoint -OwningProcess $pid2 -ErrorAction SilentlyContinue | Format-Table | Out-String | Tee-Object -Append out/netstat.txt
+          Write-Host '--- 进程是否还活着 ---'
+          $p.Refresh(); Write-Host "HasExited=$($p.HasExited) ExitCode=$(if($p.HasExited){$p.ExitCode})"
+          Stop-Process -Id $pid2 -Force -ErrorAction SilentlyContinue
+          $seen.GetEnumerator() | ForEach-Object { "$($_.Value)`t$($_.Key)" } | Set-Content out/connections.txt
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: net-recon
+          path: out/*.txt
+          if-no-files-found: warn
