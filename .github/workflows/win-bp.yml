@@ -1,0 +1,40 @@
+# 断点抓调用栈：MessageBox / ExitProcess / 崩溃点 → 定位"谁弹的错、在哪条指令"
+name: win-bp
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/win_minidbg.py'
+      - '.github/workflows/win-bp.yml'
+
+jobs:
+  bp:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 断点抓栈
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          python scripts/win_minidbg.py --exe 'samples\HWIDMaster-0902.exe' `
+            --bp 'user32!MessageBoxW' --bp 'user32!MessageBoxA' `
+            --bp 'kernel32!ExitProcess' --bp 'ntdll!NtTerminateProcess' `
+            --maxhits 4 --timeout 45 --json out/bp.json 2>&1 |
+            Tee-Object -FilePath out/bp.txt
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bp-report
+          path: |
+            out/bp.json
+            out/bp.txt
+          if-no-files-found: warn

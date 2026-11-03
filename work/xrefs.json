@@ -1,0 +1,343 @@
+{
+  "exe": "work/dumped.exe",
+  "strings": [
+    {
+      "kw": "解码",
+      "rva": "0x697fd3",
+      "text": "解码配置",
+      "xrefs": [
+        "0x1abc7",
+        "0x1ac16",
+        "0x1ac83",
+        "0x1acd2",
+        "0x1ad3f",
+        "0x1ad8e",
+        "0x1adfb",
+        "0x1ae68",
+        "0x1aeda",
+        "0x1af4c"
+      ],
+      "gates": [
+        {
+          "off": 105432,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 17,
+          "score": 53,
+          "via": "push imm32",
+          "xref_rva": 109511,
+          "gate_rva": 109528,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        },
+        {
+          "off": 105511,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 17,
+          "score": 53,
+          "via": "push imm32",
+          "xref_rva": 109590,
+          "gate_rva": 109607,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        },
+        {
+          "off": 105620,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 17,
+          "score": 53,
+          "via": "push imm32",
+          "xref_rva": 109699,
+          "gate_rva": 109716,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        },
+        {
+          "off": 105699,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 17,
+          "score": 53,
+          "via": "push imm32",
+          "xref_rva": 109778,
+          "gate_rva": 109795,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        }
+      ]
+    },
+    {
+      "kw": "解码",
+      "rva": "0x698044",
+      "text": "解码模式",
+      "xrefs": [
+        "0x1b48b",
+        "0x1b4fd"
+      ],
+      "gates": [
+        {
+          "off": 107688,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 29,
+          "score": 52,
+          "via": "push imm32",
+          "xref_rva": 111755,
+          "gate_rva": 111784,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        },
+        {
+          "off": 107802,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 29,
+          "score": 52,
+          "via": "push imm32",
+          "xref_rva": 111869,
+          "gate_rva": 111898,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        },
+        {
+          "off": 107847,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 74,
+          "score": 46,
+          "via": "push imm32",
+          "xref_rva": 111869,
+          "gate_rva": 111943,
+          "aob": "00a144c6390285c07505b8956aa900506801"
+        },
+        {
+          "off": 107579,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 80,
+          "score": 45,
+          "via": "push imm32",
+          "xref_rva": 111755,
+          "gate_rva": 111675,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        }
+      ]
+    },
+    {
+      "kw": "解码",
+      "rva": "0x698067",
+      "text": "解码特征",
+      "xrefs": [
+        "0x1b73f",
+        "0x1b919"
+      ],
+      "gates": [
+        {
+          "off": 108336,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 15,
+          "score": 54,
+          "via": "push imm32",
+          "xref_rva": 112447,
+          "gate_rva": 112432,
+          "aob": "806a008b45e085c07505b8956aa900506804"
+        },
+        {
+          "off": 108810,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 15,
+          "score": 54,
+          "via": "push imm32",
+          "xref_rva": 112921,
+          "gate_rva": 112906,
+          "aob": "806a008b45ec85c07505b8956aa900506804"
+        },
+        {
+          "off": 108380,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 29,
+          "score": 52,
+          "via": "push imm32",
+          "xref_rva": 112447,
+          "gate_rva": 112476,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        },
+        {
+          "off": 108854,
+          "jcc": "jnz",
+          "bytes": "7505",
+          "has_cmp": true,
+          "dist": 29,
+          "score": 52,
+          "via": "push imm32",
+          "xref_rva": 112921,
+          "gate_rva": 112950,
+          "aob": "806a008b45fc85c07505b8956aa900506804"
+        }
+      ]
+    },
+    {
+      "kw": "错误",
+      "rva": "0x1f7f854",
+      "text": "错误",
+      "xrefs": [
+        "0x4e7a6"
+      ],
+      "gates": [
+        {
+          "off": 317387,
+          "jcc": "jz",
+          "bytes": "7417",
+          "has_cmp": false,
+          "dist": 37,
+          "score": 36,
+          "via": "push imm32",
+          "xref_rva": 321446,
+          "gate_rva": 321483,
+          "aob": "043d01010080771f741705feffff7f83f806"
+        },
+        {
+          "off": 317425,
+          "jcc": "jz",
+          "bytes": "74eb",
+          "has_cmp": false,
+          "dist": 75,
+          "score": 31,
+          "via": "push imm32",
+          "xref_rva": 321446,
+          "gate_rva": 321521,
+          "aob": "c33d01040080771c74eb3d01020080740d3d"
+        },
+        {
+          "off": 317397,
+          "jcc": "ja",
+          "bytes": "7744",
+          "has_cmp": true,
+          "dist": 47,
+          "score": 30,
+          "via": "push imm32",
+          "xref_rva": 321446,
+          "gate_rva": 321493,
+          "aob": "05feffff7f83f8067744ff248520e84400b8"
+        },
+        {
+          "off": 317432,
+          "jcc": "jz",
+          "bytes": "740d",
+          "has_cmp": false,
+          "dist": 82,
+          "score": 30,
+          "via": "push imm32",
+          "xref_rva": 321446,
+          "gate_rva": 321528,
+          "aob": "1c74eb3d01020080740d3d01030080751ab8"
+        }
+      ]
+    },
+    {
+      "kw": "错误",
+      "rva": "0x1f83bf8",
+      "text": "错误",
+      "xrefs": [
+        "0x4f6e1",
+        "0x51073",
+        "0x51415",
+        "0x51596"
+      ],
+      "gates": [
+        {
+          "off": 327791,
+          "jcc": "jnz",
+          "bytes": "751a",
+          "has_cmp": true,
+          "dist": 4,
+          "score": 55,
+          "via": "push imm32",
+          "xref_rva": 331891,
+          "gate_rva": 331887,
+          "aob": "000050ff575485c0751a6a1068f83b380268"
+        },
+        {
+          "off": 328721,
+          "jcc": "jnz",
+          "bytes": "7513",
+          "has_cmp": true,
+          "dist": 4,
+          "score": 55,
+          "via": "push imm32",
+          "xref_rva": 332821,
+          "gate_rva": 332817,
+          "aob": "64e89195fdff85c075136a1068f83b380268"
+        },
+        {
+          "off": 329095,
+          "jcc": "jnz",
+          "bytes": "750b",
+          "has_cmp": true,
+          "dist": 15,
+          "score": 54,
+          "via": "push imm32",
+          "xref_rva": 333206,
+          "gate_rva": 333191,
+          "aob": "e8ec56000083f801750b6a008bcde89e5900"
+        },
+        {
+          "off": 321212,
+          "jcc": "jnz",
+          "bytes": "751f",
+          "has_cmp": true,
+          "dist": 37,
+          "score": 51,
+          "via": "push imm32",
+          "xref_rva": 325345,
+          "gate_rva": 325308,
+          "aob": "0100008b51f885d2751f68003c38028d4c24"
+        }
+      ]
+    },
+    {
+      "kw": "请输入",
+      "rva": "0x1f8729c",
+      "text": "请输入欲跳转到页号(%d-%d):",
+      "xrefs": [
+        "0x8211d"
+      ],
+      "gates": [
+        {
+          "off": 528671,
+          "jcc": "jb",
+          "bytes": "7238",
+          "has_cmp": false,
+          "dist": 2,
+          "score": 20,
+          "via": "push imm32",
+          "xref_rva": 532765,
+          "gate_rva": 532767,
+          "aob": "50518d54240c689c72380252ff15e8b65100"
+        },
+        {
+          "off": 528581,
+          "jcc": "jl",
+          "bytes": "7c24",
+          "has_cmp": false,
+          "dist": 88,
+          "score": 9,
+          "via": "push imm32",
+          "xref_rva": 532765,
+          "gate_rva": 532677,
+          "aob": "909090568bf1578b7c240c8d465c5068e903"
+        }
+      ]
+    }
+  ]
+}
