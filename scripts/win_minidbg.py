@@ -142,6 +142,8 @@ k32.CloseHandle.argtypes = [P]
 k32.TerminateProcess.argtypes = [P, wt.UINT]
 k32.Wow64GetThreadContext.argtypes = [P, ctypes.POINTER(WOW64_CONTEXT)]
 k32.Wow64GetThreadContext.restype = wt.BOOL
+k32.K32EnumProcessModulesEx.argtypes = [P, P, wt.DWORD, ctypes.POINTER(wt.DWORD), wt.DWORD]
+k32.K32EnumProcessModulesEx.restype = wt.BOOL
 k32.K32EnumProcessModules.argtypes = [P, P, wt.DWORD, ctypes.POINTER(wt.DWORD)]
 k32.K32EnumProcessModules.restype = wt.BOOL
 k32.K32GetModuleBaseNameW.argtypes = [P, P, ctypes.c_wchar_p, wt.DWORD]
@@ -280,7 +282,13 @@ def main():
         """枚举目标进程所有模块 → dll_bases（name→base）"""
         mods = (wt.HMODULE * 2048)()
         cb = wt.DWORD(0)
-        if not k32.K32EnumProcessModules(P(hp), ctypes.byref(mods), ctypes.sizeof(mods), ctypes.byref(cb)):
+        # 关键：64 位进程枚举 WOW64 目标，必须用 LIST_MODULES_32BIT(1)，否则只看得到 64 位模块
+        ok = k32.K32EnumProcessModulesEx(P(hp), ctypes.byref(mods), ctypes.sizeof(mods),
+                                         ctypes.byref(cb), 1)
+        if not ok:
+            ok = k32.K32EnumProcessModulesEx(P(hp), ctypes.byref(mods), ctypes.sizeof(mods),
+                                             ctypes.byref(cb), 3)   # ALL
+        if not ok:
             return 0
         n = cb.value // ctypes.sizeof(wt.HMODULE)
         for i in range(n):
@@ -374,8 +382,8 @@ def main():
                         mod = MODULEINFO()
                         mods = (wt.HMODULE * 1024)()
                         cb = wt.DWORD(0)
-                        if k32.K32EnumProcessModules(P(hp), ctypes.byref(mods), ctypes.sizeof(mods),
-                                                     ctypes.byref(cb)) and cb.value:
+                        if k32.K32EnumProcessModulesEx(P(hp), ctypes.byref(mods), ctypes.sizeof(mods),
+                                                       ctypes.byref(cb), 1) and cb.value:
                             k32.K32GetModuleInformation(P(hp), ctypes.cast(mods[0], P),
                                                         ctypes.byref(mod), ctypes.sizeof(mod))
                             base = mod.lpBaseOfDll or 0
