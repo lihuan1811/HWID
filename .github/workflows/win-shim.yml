@@ -1,0 +1,67 @@
+# 假设验证：把 taskkill 换成替身 → WMI 存活 → 程序是否不再崩、是否开始联网
+name: win-shim
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/win-shim.yml'
+
+jobs:
+  shim:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 放 taskkill 替身并运行
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          # 替身：用 whoami.exe 顶替 taskkill.exe（会立刻退出，不会杀 WMI）
+          Copy-Item "$env:SystemRoot\System32\whoami.exe" 'samples\taskkill.exe' -Force
+          Write-Host "[+] 已放替身 samples\taskkill.exe ；WMI 不会被杀"
+
+          pktmon stop 2>$null; pktmon filter remove 2>$null
+          pktmon start --capture --pkt-size 0 --file-name out\net2.etl 2>&1 | Out-Null
+          Start-Sleep -Seconds 1
+
+          Push-Location samples
+          $p = Start-Process -FilePath '.\HWIDMaster-0902.exe' -PassThru -WorkingDirectory (Get-Location).Path
+          Pop-Location
+          Write-Host "pid=$($p.Id)"
+
+          $t0 = Get-Date
+          $life = 0
+          while (((Get-Date) - $t0).TotalSeconds -lt 25) {
+            $p.Refresh()
+            if ($p.HasExited) { $life = [math]::Round(((Get-Date) - $t0).TotalSeconds,1); break }
+            $conns = Get-NetTCPConnection -OwningProcess $p.Id -ErrorAction SilentlyContinue
+            foreach ($c in $conns) {
+              if ($c.RemoteAddress -and $c.RemoteAddress -ne '0.0.0.0' -and $c.RemoteAddress -ne '::') {
+                Write-Host "  CONN $($c.LocalAddress):$($c.LocalPort) -> $($c.RemoteAddress):$($c.RemotePort) [$($c.State)]"
+              }
+            }
+            if ($p.MainWindowTitle) { Write-Host "  WINDOW: $($p.MainWindowTitle)" }
+            Start-Sleep -Milliseconds 120
+          }
+          $p.Refresh()
+          Write-Host "HasExited=$($p.HasExited) ExitCode=$(if($p.HasExited){$p.ExitCode}) 存活秒=$life 窗口='$($p.MainWindowTitle)'"
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          pktmon stop 2>&1 | Out-Null
+          Start-Sleep -Seconds 2
+          pktmon format out\net2.etl -o out\net2.txt 2>&1 | Out-Null
+          if (Test-Path out\net2.txt) {
+            Write-Host '--- 抓包里的目标 IP ---'
+            Get-Content out\net2.txt | Select-String '111\.229|TCP' | Select-Object -First 30
+          }
+          Remove-Item 'samples\taskkill.exe' -Force -ErrorAction SilentlyContinue
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shim
+          path: out/*.txt
+          if-no-files-found: warn
