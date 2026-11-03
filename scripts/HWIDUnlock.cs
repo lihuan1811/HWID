@@ -38,6 +38,10 @@ static class HWIDUnlock
     static extern bool GetWindowRect(IntPtr h, out RECT r);
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool PostMessageW(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern int GetDlgCtrlID(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr GetParent(IntPtr h);
 
     public struct RECT { public int L, T, R, B; }
     public delegate bool EnumProc(IntPtr h, IntPtr p);
@@ -83,13 +87,17 @@ static class HWIDUnlock
             Log("  子控件：Edit " + edits.Count + " 个, Button " + buttons.Count + " 个, 其它 " + others.Count + " 个");
 
             foreach (IntPtr e in edits)
-                Log("    Edit  '" + TxtOf(e) + "' en=" + IsWindowEnabled(e));
+                Log("    Edit   HWND=0x" + ((long)e).ToString("X") + " id=" + GetDlgCtrlID(e)
+                    + " text='" + TxtOf(e) + "' en=" + IsWindowEnabled(e));
             foreach (IntPtr b in buttons)
             {
                 RECT r; GetWindowRect(b, out r);
-                Log("    Button '" + TxtOf(b) + "' en=" + IsWindowEnabled(b)
+                Log("    Button HWND=0x" + ((long)b).ToString("X") + " id=" + GetDlgCtrlID(b)
+                    + " text='" + TxtOf(b) + "' en=" + IsWindowEnabled(b)
                     + " rect=" + (r.R - r.L) + "x" + (r.B - r.T));
             }
+            foreach (IntPtr top in tops)
+                Log("  顶层 HWND=0x" + ((long)top).ToString("X") + " id=" + GetDlgCtrlID(top));
 
             // 1) 填卡密
             if (edits.Count > 0)
@@ -169,10 +177,10 @@ static class HWIDUnlock
 
     static string OutDir = "";
 
-    static void DumpChild(int pid)
+    static void DumpChild(int pid, string tag)
     {
-        string dmp = Path.Combine(OutDir, "app.dmp");
-        string gz = Path.Combine(OutDir, "app.dmp.gz");
+        string dmp = Path.Combine(OutDir, tag + ".dmp");
+        string gz = Path.Combine(OutDir, tag + ".dmp.gz");
         try
         {
             IntPtr hp = IntPtr.Zero;
@@ -192,8 +200,8 @@ static class HWIDUnlock
             using (var gzs = new System.IO.Compression.GZipStream(outFs, System.IO.Compression.CompressionMode.Compress))
                 inFs.CopyTo(gzs);
             Log("已压缩: " + gz + "  (" + (new FileInfo(gz).Length / 1048576) + " MB)");
-            try { File.Delete(dmp); Log("已删除未压缩的 app.dmp（保留 .gz）"); } catch { }
-            Log(">>> 把 app.dmp.gz 发回给分析方即可 <<<");
+            try { File.Delete(dmp); Log("已删除未压缩的 " + tag + ".dmp（保留 .gz）"); } catch { }
+            Log(">>> 把 " + tag + ".dmp.gz 发回给分析方即可 <<<");
         }
         catch (Exception e) { Log("[!] 转储异常: " + e.Message); }
     }
@@ -916,7 +924,9 @@ static class HWIDUnlock
                     var dumper = new Thread(delegate ()
                     {
                         Thread.Sleep(12000);
-                        DumpChild(ChildPid);
+                        DumpChild(ChildPid, "app_12s");
+                        Thread.Sleep(12000);
+                        DumpChild(ChildPid, "app_24s");
                     });
                     dumper.IsBackground = true; dumper.Start();
 
