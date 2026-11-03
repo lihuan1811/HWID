@@ -1,0 +1,59 @@
+# 在 Windows runner 上用自带的 csc.exe 编译 HWIDUnlock.exe，并做冒烟测试
+name: win-build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/HWIDUnlock.cs'
+      - '.github/workflows/win-build.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译（csc / .NET Framework 4.8）
+        shell: pwsh
+        run: |
+          $csc = "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (-not (Test-Path $csc)) { $csc = "$env:SystemRoot\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
+          Write-Host "csc: $csc"
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          & $csc /nologo /target:exe /platform:anycpu /optimize+ /out:out\HWIDUnlock.exe `
+             /reference:System.dll /reference:System.Core.dll scripts\HWIDUnlock.cs 2>&1 | Write-Host
+          Get-ChildItem out | Format-Table Name, Length
+
+      - name: 冒烟测试（不拉起目标、8 秒后退出）
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Copy-Item out\HWIDUnlock.exe out\run.exe
+          & out\run.exe --mode log --no-launch --exit-after 8 --ports 8888,9999,27112 2>&1 | Tee-Object -FilePath out\smoke.txt
+          Write-Host '--- capture.log ---'
+          if (Test-Path out\capture.log) { Get-Content out\capture.log | Select-Object -First 30 }
+          Write-Host '--- 确认劫持已还原 ---'
+          Get-NetIPAddress -IPAddress 111.229.48.214 -ErrorAction SilentlyContinue | Format-Table
+
+      - name: 真跑一次（拉起原样本，看是否抓到包）
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Copy-Item samples\HWIDMaster-0902.exe out\HWIDMaster-0902.exe -Force
+          & out\HWIDUnlock.exe --mode log --exit-after 20 --ports 80,443,8080,8888,9000,9999,5211,27112 2>&1 |
+            Tee-Object -FilePath out\realrun.txt
+          Write-Host '--- 抓到的东西 ---'
+          if (Test-Path out\capture.log) { Get-Content out\capture.log | Select-Object -First 60 }
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unlocker
+          path: |
+            out/HWIDUnlock.exe
+            out/*.txt
+            out/capture.log
+          if-no-files-found: warn
