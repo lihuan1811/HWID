@@ -1,0 +1,44 @@
+# 编译"单文件版"：把原程序作为资源嵌进 exe
+name: win-build-allinone
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/HWIDUnlock.cs'
+      - '.github/workflows/win-build-allinone.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译（内嵌原程序 → 单文件）
+        shell: pwsh
+        run: |
+          $csc = "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          & $csc /nologo /target:exe /platform:anycpu /optimize+ `
+             /out:out\HWIDMaster_AllInOne.exe `
+             /resource:samples\HWIDMaster-0902.exe,PAYLOAD `
+             /reference:System.dll /reference:System.Core.dll scripts\HWIDUnlock.cs 2>&1 | Write-Host
+          Get-ChildItem out | Format-Table Name, Length
+
+      - name: 自检（释放内嵌载荷 + 起监听）
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & out\HWIDMaster_AllInOne.exe --extract-only --exit-after 6 --ports 8888,9999 2>&1 |
+            Tee-Object -FilePath out\allinone_smoke.txt
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allinone
+          path: |
+            out/HWIDMaster_AllInOne.exe
+            out/allinone_smoke.txt
+          if-no-files-found: warn

@@ -13,6 +13,42 @@ using System.Threading;
 
 static class HWIDUnlock
 {
+    // ---- 内嵌载荷：单文件模式下，把原程序从自身资源释放到临时目录再拉起
+    const string PAYLOAD_RES = "PAYLOAD";
+
+    static string ExtractPayload()
+    {
+        try
+        {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            Stream st = asm.GetManifestResourceStream(PAYLOAD_RES);
+            if (st == null) return null;
+            string dir = Path.Combine(Path.GetTempPath(), "HWIDMaster_payload");
+            Directory.CreateDirectory(dir);
+            string f = Path.Combine(dir, "HWIDMaster-0902.exe");
+            long want = st.Length;
+            if (File.Exists(f) && new FileInfo(f).Length == want) { Log("内嵌载荷已存在，直接复用: " + f); return f; }
+            Log("正在释放内嵌原程序（" + (want / 1048576) + " MB）...");
+            using (var fs = new FileStream(f, FileMode.Create, FileAccess.Write))
+            {
+                byte[] buf = new byte[1 << 16];
+                int n, done = 0;
+                while ((n = st.Read(buf, 0, buf.Length)) > 0)
+                {
+                    fs.Write(buf, 0, n);
+                    done += n;
+                }
+            }
+            Log("已释放到: " + f);
+            return f;
+        }
+        catch (Exception e)
+        {
+            Log("[!] 释放内嵌载荷失败: " + e.Message);
+            return null;
+        }
+    }
+
     // ---- 枚举系统 TCP 连接（用来动态发现"它连的哪个端口"）
     [System.Runtime.InteropServices.DllImport("iphlpapi.dll", SetLastError = true)]
     static extern uint GetExtendedTcpTable(IntPtr pTcpTable, ref int pdwSize, bool bOrder,
@@ -198,6 +234,7 @@ static class HWIDUnlock
             else if (a == "--no-launch") Launch = false;
             else if (a == "--keep-alias") KeepAlias = true;
             else if (a == "--exit-after" && i + 1 < argv.Length) int.TryParse(argv[++i], out ExitAfter);
+            else if (a == "--extract-only") Launch = false;
         }
         if (Ports.Count == 0)
         {
@@ -565,6 +602,12 @@ static class HWIDUnlock
             }
         }
 
+        if (!Launch)
+        {
+            string p = ExtractPayload();
+            if (p != null) Log("内嵌载荷检查完成（自检模式，不启动）");
+        }
+
         var sniffer = new Thread(delegate () { PortSniffer(); });
         sniffer.IsBackground = true;
         sniffer.Start();
@@ -581,6 +624,11 @@ static class HWIDUnlock
             {
                 string f = Path.Combine(dir, c);
                 if (File.Exists(f)) { target = f; break; }
+            }
+            if (target == null)
+            {
+                // 单文件模式：从自身资源释放
+                target = ExtractPayload();
             }
             if (target == null)
             {
