@@ -79,7 +79,7 @@ static class HWIDUnlock
     {
         for (int i = 1; i < argv.Length; i++)
         {
-            string a = argv[i].ToLowerInvariant();
+            string a = argv[i].ToLowerInvariant().Trim('"', '\'');
             if (a == "--mode" && i + 1 < argv.Length) Mode = argv[++i].ToLowerInvariant();
             else if (a == "--ip" && i + 1 < argv.Length) ServerIp = argv[++i];
             else if (a == "--ports" && i + 1 < argv.Length)
@@ -308,6 +308,7 @@ static class HWIDUnlock
         Console.WriteLine("============================================================");
 
         ParseArgs(argv);
+        Log("argv = " + string.Join(" ", argv));
 
         if (!IsAdmin())
         {
