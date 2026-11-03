@@ -41,7 +41,9 @@ ST_MEMORY64_LIST = 9
 ST_THREAD_LIST = 3
 
 # x86 CONTEXT 里 Eip/Esp/Ebp 的偏移
-CTX_X86 = dict(eip=0xB8, esp=0xC4, ebp=0xB4, eax=0xB0, ecx=0xAC, edx=0xA8)
+# 标准 i386 CONTEXT 布局（含 FloatSave）：Edi=0x80 Esi=0x84 Ebx=0x88 Edx=0x8C
+# Ecx=0x90 Eax=0x94 Ebp=0x98 Eip=0x9C SegCs=0xA0 EFlags=0xA4 Esp=0xA8 SegSs=0xAC
+CTX_X86 = dict(eip=0x9C, esp=0xA8, ebp=0x98, eax=0x94, ecx=0x90, edx=0x8C)
 CTX_X64 = dict(rip=0xF8, rsp=0x98, rbp=0xA0, rax=0xB0, rcx=0xA8, rdx=0xA0)
 
 
@@ -233,9 +235,24 @@ def main():
     ex_tid = ex['thread_id'] if ex else None
     rep['threads'] = len(ths)
     if ths:
-        # 判断位数：看 pc 或模块基址的形态，用栈大小做保守判断
-        main = next((t for t in ths if t['tid'] == ex_tid), ths[0])
-        c = dmp.context_of(main, is64)
+        allctx = []
+        for t in ths:
+            c0 = dmp.context_of(t, False)
+            if c0:
+                allctx.append((t, c0))
+        if allctx:
+            print(f'[+] 线程 {len(allctx)} 个，PC 落在模块内的那些：')
+            for t, c0 in allctx:
+                inmod = a.base <= c0['pc'] < a.base + a.size
+                print(f'    tid={t["tid"]:<6} PC={c0["pc"]:#010x} {"← 在模块内 RVA=%#x" % (c0["pc"]-a.base) if inmod else ""}')
+        main = None
+        for t, c0 in allctx:
+            if a.base <= c0['pc'] < a.base + a.size:
+                main = t
+                break
+        if main is None:
+            main = next((t for t in ths if t['tid'] == ex_tid), ths[0])
+        c = dmp.context_of(main, False)
         if c:
             print(f'[+] 主线程 pid={main["tid"]}  PC={c["pc"]:#x}  SP={c["sp"]:#x}  BP={c["bp"]:#x}'
                   f'   → PC RVA={c["pc"] - a.base:#x}' if c['pc'] > a.base else '')
