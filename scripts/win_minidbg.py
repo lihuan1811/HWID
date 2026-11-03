@@ -321,8 +321,11 @@ def main():
                 print(f'[+] 断点已下: {spec} @ {addr:#x}')
 
     exited = False
+    n_events = 0
     while time.time() - t0 < a.timeout and len(hits) < a.maxhits and not exited:
+        n_events += 1
         if not k32.WaitForDebugEvent(ctypes.byref(ev), 500):
+            time.sleep(0.01)
             continue
         code = ev.dwDebugEventCode
         cont = DBG_CONTINUE
@@ -422,7 +425,9 @@ def main():
                     if wpm(hp, base + rva, data):
                         print(f'  [patch] RVA {rva:#x} ← {data.hex()}')
                 if not a.continue_after_patch:
-                    k32.TerminateProcess(P(hp), 0)
+                    print(f'[dbg] 退出循环 elapsed={time.time() - t0:.1f}s 迭代={n_events} exited={exited} '
+          f'hits={len(hits)} armed={len(armed)} 模块={len(dll_bases)}')
+    k32.TerminateProcess(P(hp), 0)
                     cont = DBG_CONTINUE
                 else:
                     cont = DBG_CONTINUE
@@ -452,6 +457,8 @@ def main():
 
         k32.ContinueDebugEvent(ev.dwProcessId, ev.dwThreadId, cont)
 
+    print(f'[dbg] 退出循环 elapsed={time.time() - t0:.1f}s 迭代={n_events} exited={exited} '
+          f'hits={len(hits)} armed={len(armed)} 模块={len(dll_bases)}')
     k32.TerminateProcess(P(hp), 0)
     if a.json:
         json.dump(dict(exe=a.exe, pid=pid, base=hex(base), size=hex(size), hits=hits),
