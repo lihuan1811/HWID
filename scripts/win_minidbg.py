@@ -305,6 +305,9 @@ def main():
                     continue
                 addr = resolve_export(hp, b0, fn)
                 if not addr:
+                    if spec not in getattr(try_arm, '_warned', set()):
+                        try_arm._warned = getattr(try_arm, '_warned', set()) | {spec}
+                        print(f'[!] 解析导出失败: {spec} (模块 {dll} 基址 {b0:#x})')
                     continue
                 wanted[spec] = addr
                 print(f'[+] 解析到 {spec} = {addr:#x} (模块基址 {b0:#x})')
@@ -374,10 +377,11 @@ def main():
                                   f'EP RVA={(mod.EntryPoint or 0) - base:#x}')
                     except Exception as ex:
                         print(f'[!] 取模块信息失败: {ex}')
-                if not dll_bases:
-                    nmod = refresh_modules()
-                    print(f'[+] 已枚举 {nmod} 个模块；user32={"user32.dll" in dll_bases} '
-                          f'kernel32={"kernel32.dll" in dll_bases} ntdll={"ntdll.dll" in dll_bases}')
+                # 每次都重新枚举模块（DLL 陆续加载），再解析导出并下断
+                nmod = refresh_modules()
+                print(f'[+] 已枚举 {nmod} 个模块；user32={"user32.dll" in dll_bases} '
+                      f'kernel32={"kernel32.dll" in dll_bases} ntdll={"ntdll.dll" in dll_bases} '
+                      f'已下断={len(armed)}')
                 try_arm()
             elif ecode == EXCEPTION_BREAKPOINT and eaddr - 1 in armed:
                 spec, orig = armed[eaddr - 1]
