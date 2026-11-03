@@ -326,7 +326,13 @@ def main():
             continue
         code = ev.dwDebugEventCode
         cont = DBG_CONTINUE
-        print(f'    [ev] code={code} tid={ev.dwThreadId}')
+        # 每次事件都刷新模块表并尝试下断（DLL 陆续加载，user32/kernel32 出现后才能解析导出）
+        if code in (1, 2, 6, 3):
+            before = len(armed)
+            refresh_modules()
+            try_arm()
+            if len(armed) != before:
+                print(f'[+] 断点进度 {before}→{len(armed)}  (模块 {len(dll_bases)})')
 
         if code == CREATE_PROCESS_DEBUG_EVENT:
             pass   # 等首个断点（进程已初始化）再用 EnumProcessModules 取基址，最稳
@@ -349,9 +355,7 @@ def main():
                 pass
             if nm:
                 dll_bases.setdefault(nm.lower().split('\\')[-1], lp)
-            if not dll_bases:
-                refresh_modules()
-            try_arm()
+            pass
 
         elif code == EXCEPTION_DEBUG_EVENT:
             er = ev.u.Exception.ExceptionRecord
@@ -377,12 +381,7 @@ def main():
                                   f'EP RVA={(mod.EntryPoint or 0) - base:#x}')
                     except Exception as ex:
                         print(f'[!] 取模块信息失败: {ex}')
-                # 每次都重新枚举模块（DLL 陆续加载），再解析导出并下断
-                nmod = refresh_modules()
-                print(f'[+] 已枚举 {nmod} 个模块；user32={"user32.dll" in dll_bases} '
-                      f'kernel32={"kernel32.dll" in dll_bases} ntdll={"ntdll.dll" in dll_bases} '
-                      f'已下断={len(armed)}')
-                try_arm()
+                print(f'[+] 模块 {len(dll_bases)} 个 已下断={len(armed)}')
             elif ecode == EXCEPTION_BREAKPOINT and eaddr - 1 in armed:
                 spec, orig = armed[eaddr - 1]
                 # 恢复原字节并把 EIP 退回去，读上下文
