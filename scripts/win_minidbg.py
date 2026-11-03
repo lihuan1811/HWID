@@ -300,6 +300,12 @@ def main():
             if ln:
                 name = buf.value.lower()
                 dll_bases[name] = ctypes.cast(h, P).value or 0
+        if not getattr(refresh_modules, '_shown', False):
+            refresh_modules._shown = True
+            print('[dbg] 模块名样例: ' + ', '.join(sorted(dll_bases.keys())[:18]))
+            miss = [sp for sp in a.bp if sp.split('!')[0].lower() not in dll_bases]
+            if miss:
+                print(f'[dbg] 这些断点的 DLL 还没在列表里: {miss}')
         return n
 
     def try_arm():
