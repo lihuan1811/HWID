@@ -1,0 +1,82 @@
+# 崩点定位 + 解密覆盖率 + UI 文案上下文（易语言程序）
+name: win-crash
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/win-crash.yml'
+      - 'tools/kw_context.py'
+      - 'tools/decrypt_coverage.py'
+
+jobs:
+  crash:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 依赖
+        shell: pwsh
+        run: |
+          python -m pip install --quiet capstone
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile tools\procdump.zip
+          Expand-Archive tools\procdump.zip -DestinationPath tools -Force
+
+      - name: 采集崩溃转储 + 首次异常日志
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          # 首次异常（-e 1）：能看到壳自己"故意"抛的异常
+          Write-Host '===== procdump -e 1（first-chance exception 日志）====='
+          & tools\procdump64.exe -accepteula -e 1 -ma -t 'samples\HWIDMaster-0902.exe' 'out\firstchance.dmp' 2>&1 |
+            Tee-Object -FilePath out\firstchance.log
+          # 崩溃转储（-e，unhandled）
+          Write-Host '===== procdump -e（unhandled exception 崩溃转储）====='
+          & tools\procdump64.exe -accepteula -e -ma -t 'samples\HWIDMaster-0902.exe' 'out\crash.dmp' 2>&1 |
+            Tee-Object -FilePath out\crash_procdump.log
+          Get-ChildItem out -Filter *.dmp | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB) }
+
+      - name: 崩点定位（线程 PC + 栈回溯）
+        shell: pwsh
+        run: |
+          $dmp = Get-ChildItem out -Filter *.dmp | Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $dmp) { throw '没有拿到 dump' }
+          Write-Host "分析: $($dmp.Name)"
+          python tools/dmp2img.py --dmp "$($dmp.FullName)" --base 0x400000 --size 0x54b1000 `
+                 --module HWIDMaster --out out\mem.bin --json out/dmp.json
+          Write-Host '===== 解密覆盖率（逐段比对磁盘原文）====='
+          python tools/decrypt_coverage.py --img out\mem.bin --orig samples\HWIDMaster-0902.exe --json out/coverage.json
+
+      - name: UI 文案上下文（卡密/激活/到期…）
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $dmp = Get-ChildItem out -Filter *.dmp | Sort-Object Length -Descending | Select-Object -First 1
+          python tools/kw_context.py "$($dmp.FullName)" --base 0x400000 | Tee-Object -FilePath out\kw.txt
+          Write-Host '--- 镜像里也扫一遍 ---'
+          python tools/kw_context.py out\mem.bin --base 0x400000 | Tee-Object -FilePath out\kw_mem.txt
+
+      - name: 尝试还原并找门
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python tools/dump2exe.py --dump out\mem.bin --base 0x400000 --out out\unpacked.exe --drop-shell --report
+          python tools/pe_triage.py out\unpacked.exe --json out/triage_unpacked.json
+          python tools/delphi_gate.py --exe out\unpacked.exe --json out/gates.json --top 30
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-report
+          path: |
+            out/*.json
+            out/*.txt
+            out/*.log
+          if-no-files-found: warn
