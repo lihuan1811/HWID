@@ -1,0 +1,54 @@
+# 用 Windows 自带 pktmon 抓包：看它到底连不连 111.229.48.214、连哪个端口、发什么
+name: win-pkt
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/win-pkt.yml'
+
+jobs:
+  pkt:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: pktmon 抓包 + 运行样本
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          pktmon stop 2>$null
+          pktmon filter remove 2>$null
+          # 只抓 IPv4 的 TCP（少点噪音）
+          pktmon start --capture --pkt-size 0 --file-name out\net.etl 2>&1 | Out-String | Write-Host
+          Start-Sleep -Seconds 2
+          $p = Start-Process -FilePath 'samples\HWIDMaster-0902.exe' -PassThru
+          Write-Host "pid=$($p.Id) 运行 20 秒"
+          # 同时高频轮询 netstat 抓 SYN_SENT
+          $t0 = Get-Date
+          while (((Get-Date) - $t0).TotalSeconds -lt 20) {
+            netstat -no 2>$null | Select-String 'SYN|ESTABLISHED' | ForEach-Object { "$(Get-Date -Format HH:mm:ss.fff)`t$_" } |
+              Select-String '111\.229\.48\.214' | ForEach-Object { Write-Host "NETSTAT: $_" }
+            Start-Sleep -Milliseconds 100
+          }
+          $p.Refresh(); Write-Host "HasExited=$($p.HasExited) ExitCode=$(if($p.HasExited){$p.ExitCode})"
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          pktmon stop 2>&1 | Out-String | Write-Host
+          Start-Sleep -Seconds 2
+          Write-Host '--- 转文本 ---'
+          pktmon format out\net.etl -o out\net.txt 2>&1 | Out-String | Write-Host
+          if (Test-Path out\net.txt) { Get-Content out\net.txt | Select-Object -First 60 }
+          Write-Host '--- 过滤目标 IP ---'
+          if (Test-Path out\net.txt) { Get-Content out\net.txt | Select-String '111\.229\.48\.214' | Select-Object -First 40 }
+
+      - name: 上传
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkt
+          path: |
+            out/net.txt
+            out/net.etl
+          if-no-files-found: warn
